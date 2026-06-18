@@ -62,6 +62,38 @@ export const Dashboard: FC = () => {
   const [apiError, setApiError] = useState('');
   const [apiSuccess, setApiSuccess] = useState('');
 
+  // 일정 수정 관련 상태
+  const [editingTicket, setEditingTicket] = useState<TicketResponse | null>(null);
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
+
+  const handleOpenEditModal = (ticket: TicketResponse) => {
+    setEditingTicket(ticket);
+    setEditStartDate(ticket.start_date || '');
+    setEditDueDate(ticket.due_date || '');
+  };
+
+  const handleSaveDates = async () => {
+    if (!editingTicket) return;
+    try {
+      setLoading(true);
+      await axiosInstance.put(`/tickets/${editingTicket.id}`, {
+        start_date: editStartDate || null,
+        due_date: editDueDate || null
+      });
+      setApiSuccess('일정이 성공적으로 수정되었습니다.');
+      setEditingTicket(null);
+      fetchTickets();
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      setApiError('일정 수정에 실패했습니다.');
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 프로젝트 목록 로드
   const fetchProjects = async () => {
     try {
@@ -445,6 +477,17 @@ export const Dashboard: FC = () => {
               <p className="text-slate-400 text-sm">각 개발 일정 티켓들의 시작일과 마감 마일스톤 범위를 시각적으로 가시화한 타임라인 그래프 뷰입니다.</p>
             </div>
 
+            {apiError && (
+              <div className="bg-red-900/30 border border-red-500/50 text-red-200 text-sm p-4 rounded-lg animate-fade-in">
+                ⚠️ {apiError}
+              </div>
+            )}
+            {apiSuccess && (
+              <div className="bg-green-900/30 border border-green-500/50 text-green-200 text-sm p-4 rounded-lg animate-pulse">
+                ✓ {apiSuccess}
+              </div>
+            )}
+
             {tickets.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 border border-dashed border-slate-800 rounded-xl bg-[#070a13] text-center px-4">
                 <Calendar className="w-12 h-12 text-slate-600 mb-4 animate-bounce" />
@@ -497,9 +540,15 @@ export const Dashboard: FC = () => {
                               )}
                               <h4 className="font-medium text-slate-200 text-sm truncate" title={ticket.title}>{ticket.title}</h4>
                             </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5 flex gap-2">
+                            <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
                               <span>시작: {ticket.start_date || '미지정'}</span>
                               <span>마감: {ticket.due_date || '미지정'}</span>
+                              <button 
+                                onClick={() => handleOpenEditModal(ticket)}
+                                className="text-brand-400 hover:text-brand-300 transition underline cursor-pointer ml-1"
+                              >
+                                기간 수정
+                              </button>
                             </div>
                           </div>
 
@@ -516,8 +565,9 @@ export const Dashboard: FC = () => {
                             {hasDates && (
                               <div 
                                 style={barStyle}
+                                onClick={() => handleOpenEditModal(ticket)}
                                 className={`absolute h-4 top-1 rounded-full bg-gradient-to-r ${priorityColor} shadow-md flex items-center px-2 text-[9px] text-white font-bold select-none cursor-pointer hover:scale-[1.01] transition transform`}
-                                title={`${ticket.title} (${ticket.start_date} ~ ${ticket.due_date})`}
+                                title={`${ticket.title} (${ticket.start_date} ~ ${ticket.due_date}) - 클릭하여 일정 수정`}
                               >
                                 <span className="truncate">{ticket.title}</span>
                               </div>
@@ -792,6 +842,68 @@ export const Dashboard: FC = () => {
         )}
 
       </div>
+
+      {/* 일정 수정 모달 */}
+      {editingTicket && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">📅 일정 기간 수정</h3>
+              <button 
+                onClick={() => setEditingTicket(null)}
+                className="text-slate-400 hover:text-slate-200 transition font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">태스크명</label>
+                <div className="bg-slate-900/50 border border-slate-800 text-slate-300 px-4 py-2.5 rounded-lg text-sm font-semibold truncate" title={editingTicket.title}>
+                  {editingTicket.title}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">시작일</label>
+                  <input 
+                    type="date" 
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">마감일</label>
+                  <input 
+                    type="date" 
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setEditingTicket(null)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
+              >
+                취소
+              </button>
+              <button 
+                onClick={handleSaveDates}
+                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

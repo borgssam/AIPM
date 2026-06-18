@@ -70,6 +70,15 @@ class TicketResponse(BaseModel):
         "from_attributes": True
     }
 
+class TicketUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[int] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+
 class ScheduleGenerateRequest(BaseModel):
     project_name: str = Field(..., json_schema_extra={"example": "신규 펫 프로젝트"})
     prd_content: str = Field(..., json_schema_extra={"example": "# 요구명세서\n..."})

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 # backend 폴더 내 모듈 임포트
@@ -49,3 +49,25 @@ def get_tickets(
         
     tickets = query.all()
     return tickets
+
+@router.put("/{ticket_id}", response_model=schemas.TicketResponse)
+def update_ticket(
+    ticket_id: int,
+    ticket_update: schemas.TicketUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
+    """
+    티켓 ID에 해당하는 태스크 티켓의 필드(시작일, 마감일 등)를 수정하는 API.
+    """
+    ticket = db.query(models.KanbanTicket).filter(models.KanbanTicket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="티켓을 찾을 수 없습니다.")
+    
+    update_data = ticket_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(ticket, key, value)
+    
+    db.commit()
+    db.refresh(ticket)
+    return ticket
