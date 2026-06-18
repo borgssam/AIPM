@@ -402,3 +402,20 @@ class ProjectSettingUpdate(BaseModel):
 
 - **SQLite 외래키 활성화 및 CASCADE:** SQLite에서 상충 티켓 삭제나 마일스톤 초기화 시 무결성이 유지되도록 `ON DELETE CASCADE` 설정을 적용하고 데이터베이스 세션 초기화 시 `PRAGMA foreign_keys = ON;`을 강제 활성화합니다.
 - **설정 초기 데이터 적재:** 어플리케이션 초기 가동 시 `project_settings` 테이블에 `slack_webhook_url` 설정 레코드를 기본 삽입해 놓는 마이그레이션 단계를 추가합니다.
+
+---
+
+## 4. 프론트엔드 다이내믹 테마 설계 (Dynamic Theme Design)
+
+프론트엔드 UI의 일관된 테마 스위칭을 위해 CSS의 `data-theme` 속성과 글로벌 스타일시트(`index.css`)의 규칙을 조합해 구현합니다.
+
+### 4.1 테마 데이터 모델 및 상태 관리
+*   **상태 정의:** `App.tsx`에서 `'dolphin'` (기본값) | `'sunflower'` | `'marigold'`(금잔디) 세 가지 문자열로 현재 테마 상태를 로컬 상태(`theme`)로 관리합니다.
+*   **영속성 보장:** 사용자가 변경한 테마 정보는 브라우저의 `localStorage`의 `theme` 키에 동기화되어 저장되고, 마운트 시 이를 로드하여 상태의 초기값으로 할당합니다.
+*   **동적 적용:** 테마 값이 변경될 때마다 `document.documentElement.setAttribute('data-theme', theme)`를 호출하여 HTML 루트 객체에 선택된 테마 속성을 동적으로 인스턴싱합니다.
+
+### 4.2 글로벌 CSS 선택자 정의
+`index.css` 내에서 `[data-theme='dolphin']`, `[data-theme='sunflower']`, `[data-theme='marigold']` 클래스 하위의 색상 스타일을 오버라이딩합니다.
+*   `dolphin` (돌고래 - 푸른 바다): 진한 바다 파랑 바탕 및 스카이 블루/사이언 브랜드 포인트
+*   `sunflower` (해바라기 - 노랑/주황): 웜 챠콜 및 해바라기 옐로우/오렌지 포인트
+*   `marigold` (금잔디 - 녹색/연두): 다크 포레스트 그린 바탕 및 연두/에메랄드/민트 포인트

@@ -34,3 +34,72 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* ==================== 테마별 색상 오버라이딩 (Dolphin, Sunflower, Geumjandi) ==================== */
+
+/* 1. 돌고래 테마 (기본 다크 네이비 / 오션 블루 매칭) */
+[data-theme='dolphin'] body { background-color: #050b14 !important; }
+[data-theme='dolphin'] .bg-\[\#0b0f19\] { background-color: #050b14 !important; }
+[data-theme='dolphin'] .bg-\[\#0f172a\] { background-color: #0b132b !important; }
+[data-theme='dolphin'] .bg-\[\#070a13\] { background-color: #001220 !important; }
+[data-theme='dolphin'] .bg-\[\#121b2e\] { background-color: #1c2541 !important; }
+[data-theme='dolphin'] .bg-\[\#1e293b\] { background-color: #22333b !important; }
+[data-theme='dolphin'] .bg-slate-900 { background-color: #050b14 !important; }
+[data-theme='dolphin'] .bg-slate-950\/80 { background-color: rgba(5, 11, 20, 0.8) !important; }
+[data-theme='dolphin'] .border-slate-800 { border-color: #1e3a8a !important; }
+[data-theme='dolphin'] .border-slate-700 { border-color: #3b82f6/40 !important; }
+[data-theme='dolphin'] .bg-brand-500 { background-color: #00b4d8 !important; }
+[data-theme='dolphin'] .bg-brand-600 { background-color: #0077b6 !important; }
+[data-theme='dolphin'] .bg-brand-650 { background-color: #03045e !important; }
+[data-theme='dolphin'] .hover\:bg-brand-600:hover { background-color: #0077b6 !important; }
+[data-theme='dolphin'] .text-brand-400 { color: #00b4d8 !important; }
+[data-theme='dolphin'] .text-brand-300 { color: #4ea8de !important; }
+[data-theme='dolphin'] .from-blue-400 { --tw-gradient-from: #00b4d8 !important; }
+[data-theme='dolphin'] .to-indigo-400 { --tw-gradient-to: #0077b6 !important; }
+[data-theme='dolphin'] .from-blue-500 { --tw-gradient-from: #00b4d8 !important; --tw-gradient-to: #0077b6 !important; }
+[data-theme='dolphin'] .to-brand-600 { --tw-gradient-to: #03045e !important; }
+
+/* 2. 해바라기 테마 (웜 차콜 및 골드/옐로우/오렌지 매칭) */
+[data-theme='sunflower'] body { background-color: #100b06 !important; }
+[data-theme='sunflower'] .bg-\[\#0b0f19\] { background-color: #100b06 !important; }
+[data-theme='sunflower'] .bg-\[\#0f172a\] { background-color: #1d150e !important; }
+[data-theme='sunflower'] .bg-\[\#070a13\] { background-color: #130f0a !important; }
+[data-theme='sunflower'] .bg-\[\#121b2e\] { background-color: #251c13 !important; }
+[data-theme='sunflower'] .bg-\[\#1e293b\] { background-color: #38291a !important; }
+[data-theme='sunflower'] .bg-slate-900 { background-color: #100b06 !important; }
+[data-theme='sunflower'] .bg-slate-950\/80 { background-color: rgba(16, 11, 6, 0.8) !important; }
+[data-theme='sunflower'] .border-slate-800 { border-color: #5c4028 !important; }
+[data-theme='sunflower'] .border-slate-700 { border-color: #7c5835/40 !important; }
+[data-theme='sunflower'] .bg-brand-500 { background-color: #f39c12 !important; }
+[data-theme='sunflower'] .bg-brand-600 { background-color: #e67e22 !important; }
+[data-theme='sunflower'] .bg-brand-650 { background-color: #d35400 !important; }
+[data-theme='sunflower'] .hover\:bg-brand-600:hover { background-color: #e67e22 !important; }
+[data-theme='sunflower'] .text-brand-400 { color: #f1c40f !important; }
+[data-theme='sunflower'] .text-brand-300 { color: #f39c12 !important; }
+[data-theme='sunflower'] .from-blue-400 { --tw-gradient-from: #f1c40f !important; }
+[data-theme='sunflower'] .to-indigo-400 { --tw-gradient-to: #e67e22 !important; }
+[data-theme='sunflower'] .from-blue-500 { --tw-gradient-from: #f39c12 !important; --tw-gradient-to: #e67e22 !important; }
+[data-theme='sunflower'] .to-brand-600 { --tw-gradient-to: #d35400 !important; }
+
+/* 3. 금잔디 테마 (다크 포레스트 및 딥 에메랄드/그린/연두 매칭) */
+[data-theme='marigold'] body { background-color: #030b06 !important; }
+[data-theme='marigold'] .bg-\[\#0b0f19\] { background-color: #030b06 !important; }
+[data-theme='marigold'] .bg-\[\#0f172a\] { background-color: #07150d !important; }
+[data-theme='marigold'] .bg-\[\#070a13\] { background-color: #040f09 !important; }
+[data-theme='marigold'] .bg-\[\#121b2e\] { background-color: #112c1b !important; }
+[data-theme='marigold'] .bg-\[\#1e293b\] { background-color: #0e2617 !important; }
+[data-theme='marigold'] .bg-slate-900 { background-color: #030b06 !important; }
+[data-theme='marigold'] .bg-slate-950\/80 { background-color: rgba(3, 11, 6, 0.8) !important; }
+[data-theme='marigold'] .border-slate-800 { border-color: #0f3d23 !important; }
+[data-theme='marigold'] .border-slate-700 { border-color: #14532d/40 !important; }
+[data-theme='marigold'] .bg-brand-500 { background-color: #20bf6b !important; }
+[data-theme='marigold'] .bg-brand-600 { background-color: #26de81 !important; }
+[data-theme='marigold'] .bg-brand-650 { background-color: #0f9b58 !important; }
+[data-theme='marigold'] .hover\:bg-brand-600:hover { background-color: #26de81 !important; }
+[data-theme='marigold'] .text-brand-400 { color: #20bf6b !important; }
+[data-theme='marigold'] .text-brand-300 { color: #26de81 !important; }
+[data-theme='marigold'] .from-blue-400 { --tw-gradient-from: #26de81 !important; }
+[data-theme='marigold'] .to-indigo-400 { --tw-gradient-to: #0f9b58 !important; }
+[data-theme='marigold'] .from-blue-500 { --tw-gradient-from: #20bf6b !important; --tw-gradient-to: #26de81 !important; }
+[data-theme='marigold'] .to-brand-600 { --tw-gradient-to: #0f9b58 !important; }
+

@@ -18,6 +18,15 @@ const AppContent: FC = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
   const [user, setUser] = useState<UserInfo | null>(null);
 
+  const [theme, setTheme] = useState<string>(() => {
+    return localStorage.getItem('theme') || 'dolphin';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
   // 라우트 경로 이동이 발생할 때마다 로컬 스토리지 세션과 사용자 데이터 동기화
   useEffect(() => {
     const currentToken = localStorage.getItem('token');
@@ -63,6 +72,29 @@ const AppContent: FC = () => {
         </div>
         
         <div className="flex items-center gap-6">
+          {/* 테마 변경 버튼 */}
+          <div className="flex items-center gap-2 bg-[#121b2e] border border-slate-800 px-3 py-1 rounded-lg text-[11px] md:text-xs">
+            <span className="text-slate-450 font-bold mr-1">🎨 테마:</span>
+            <button 
+              onClick={() => setTheme('dolphin')}
+              className={`px-2 py-0.5 rounded font-medium transition ${theme === 'dolphin' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              돌고래 🐬
+            </button>
+            <button 
+              onClick={() => setTheme('sunflower')}
+              className={`px-2 py-0.5 rounded font-medium transition ${theme === 'sunflower' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              해바라기 🌻
+            </button>
+            <button 
+              onClick={() => setTheme('marigold')}
+              className={`px-2 py-0.5 rounded font-medium transition ${theme === 'marigold' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              금잔디 🌱
+            </button>
+          </div>
+
           {/* 접속한 로그인 사용자 정보 상시 노출 영역 */}
           {user && (
             <div className="hidden md:flex items-center gap-2 bg-[#1e293b] border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
