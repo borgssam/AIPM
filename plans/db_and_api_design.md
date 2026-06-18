@@ -21,33 +21,41 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 생성 일시 |
 | **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 정보 수정 일시 |
 
-#### 2) `kanban_tickets` 테이블 (일정 및 칸반 관리)
+#### 2) `epics` 테이블 (에픽/일정 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 에픽 식별 고유 ID |
+| **project_id** | `INTEGER` | `Integer` | Foreign Key (projects.id), NOT NULL | 소속 프로젝트 ID |
+| **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 에픽 제목 (Gantt 일정의 이름) |
+| **description** | `TEXT` | `Text` | NULLABLE | 상세 내용 |
+| **start_date** | `DATE` | `Date` | NULLABLE | 작업 시작 예정일 |
+| **due_date** | `DATE` | `Date` | NULLABLE | 작업 마감 예정일 |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
+
+#### 3) `kanban_tickets` 테이블 (칸반 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 티켓 식별 고유 ID |
+| **epic_id** | `INTEGER` | `Integer` | Foreign Key (epics.id), NULLABLE | 소속 에픽 ID |
 | **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 티켓 제목 |
-| **description** | `TEXT` | `Text` | NULLABLE | 태스크 상세 내용 또는 논리 상충에 대한 상세 원인 |
-| **status** | `VARCHAR(50)` | `String(50)` | NOT NULL, Default: 'TO_DO' | 칸반 보드 내 카드 상태 (`TO_DO`, `TO_REVIEW`, `IN_PROGRESS`, `DONE`) |
-| **assignee_id** | `INTEGER` | `Integer` | Foreign Key (users.id), NULLABLE | 배정된 담당 사용자 ID |
-| **priority** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'P1' | 작업 우선순위 (`P0`, `P1`, `P2`) |
-| **resolution** | `TEXT` | `Text` | NULLABLE | 담당 팀원이 입력한 스펙 해결 방안 텍스트 |
-| **start_date** | `DATE` | `Date` | NULLABLE | 작업 시작 예정일 (YYYY-MM-DD) |
-| **due_date** | `DATE` | `Date` | NULLABLE | 작업 마감 예정일 (YYYY-MM-DD) |
-| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 티켓 생성 일시 |
-| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 티켓 최종 수정 일시 (자동 갱신) |
+| **description** | `TEXT` | `Text` | NULLABLE | 상세 내용 |
+| **status** | `VARCHAR(50)` | `String(50)` | NOT NULL, Default: 'TO_DO' | 칸반 카드 상태 (`TO_DO`, `IN_PROGRESS`, `TO_REVIEW`, `DONE`) |
+| **assignee_id** | `INTEGER` | `Integer` | Foreign Key (users.id), NULLABLE | 담당 사용자 ID |
+| **priority** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'P1' | 우선순위 (`P0`, `P1`, `P2`) |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 수정 일시 |
 
-#### 3) `qa_inspection_items` 테이블 (기능/품질 검수 명세 관리)
+#### 4) `qa_inspection_items` 테이블 (검수 명세 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 검수 항목 고유 ID |
-| **ticket_id** | `INTEGER` | `Integer` | Foreign Key (kanban_tickets.id), NULLABLE | 매핑된 칸반 티켓 ID (수동/자동 연동) |
-| **category** | `VARCHAR(50)` | `String(50)` | NOT NULL | 검수 종류 구분 (`FUNCTIONAL`: 기능검수, `QUALITY`: 품질검수) |
+| **ticket_id** | `INTEGER` | `Integer` | Foreign Key (kanban_tickets.id), NOT NULL | 매핑된 칸반 티켓 ID |
+| **category** | `VARCHAR(50)` | `String(50)` | NOT NULL | 검수 구분 (`FUNCTIONAL` / `QUALITY`) |
 | **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 검수 요건 내용 |
-| **status** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'UNTESTED' | 검수 상태 (`UNTESTED`, `PASS`, `FAIL`) |
-| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 검수 항목 생성 일시 |
-| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 상태 업데이트 일시 |
-
-#### 4) `project_settings` 테이블 (시스템 전역 설정 관리)
+| **status** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'UNTESTED' | 검수 상태 (`UNTESTED`, `PASS`/`TESTED`, `FAIL`, `APPROVED`) |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 업데이트 일시 |
+#### 5) `project_settings` 테이블 (시스템 전역 설정 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 설정 인덱스 ID |
@@ -91,6 +99,7 @@ class QAItemStatus(str, enum.Enum):
     UNTESTED = "UNTESTED"
     PASS = "PASS"
     FAIL = "FAIL"
+    APPROVED = "APPROVED"
 
 # --- User ORM 모델 ---
 class User(Base):
@@ -107,26 +116,38 @@ class User(Base):
 
     tickets = relationship("KanbanTicket", back_populates="assignee")
 
+# --- Epic ORM 모델 ---
+class Epic(Base):
+    __tablename__ = "epics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)
+    due_date = Column(Date, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    tickets = relationship("KanbanTicket", back_populates="epic", cascade="all, delete-orphan")
+
 # --- KanbanTicket ORM 모델 ---
 class KanbanTicket(Base):
     __tablename__ = "kanban_tickets"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    epic_id = Column(Integer, ForeignKey("epics.id", ondelete="SET NULL"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default=TicketStatus.TO_DO.value)
     priority = Column(String(20), nullable=False, default=TicketPriority.P1.value)
     
     assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    resolution = Column(Text, nullable=True)
-    
-    start_date = Column(Date, nullable=True)
-    due_date = Column(Date, nullable=True)
     
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 관계 설정
+    epic = relationship("Epic", back_populates="tickets")
     assignee = relationship("User", back_populates="tickets")
     qa_items = relationship("QAInspectionItem", back_populates="ticket", cascade="all, delete-orphan")
 

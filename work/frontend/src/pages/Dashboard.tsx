@@ -6,10 +6,22 @@ import {
   Calendar, 
   ListTodo, 
   CheckSquare, 
-  Search 
+  Search,
+  RefreshCw
 } from 'lucide-react';
 
 type TabType = 'project_create' | 'schedule' | 'kanban' | 'functional_qa' | 'quality_qa';
+
+interface EpicResponse {
+  id: number;
+  project_id: number;
+  title: string;
+  description?: string;
+  start_date?: string;
+  due_date?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface UserResponse {
   id: number;
@@ -23,7 +35,7 @@ interface QAItemResponse {
   ticket_id: number;
   category: 'FUNCTIONAL' | 'QUALITY';
   title: string;
-  status: 'UNTESTED' | 'PASS' | 'FAIL';
+  status: 'UNTESTED' | 'PASS' | 'FAIL' | 'APPROVED';
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +46,9 @@ interface TicketResponse {
   description?: string;
   status: 'TO_DO' | 'TO_REVIEW' | 'IN_PROGRESS' | 'DONE';
   priority: 'P0' | 'P1' | 'P2';
+  project_id?: number;
+  epic_ids: number[];
+  epics: EpicResponse[];
   assignee_id?: number;
   assignee?: UserResponse;
   resolution?: string;
@@ -48,13 +63,18 @@ export const Dashboard: FC = () => {
   const userStr = localStorage.getItem('user');
   const currentUser = userStr ? JSON.parse(userStr) : null;
 
-  const [activeTab, setActiveTab] = useState<TabType>('project_create');
+  const [activeTab, setActiveTab] = useState<TabType>(
+    currentUser && currentUser.role === 'PM' ? 'project_create' : 'schedule'
+  );
   const [projectName, setProjectName] = useState('');
   const [prdContent, setPrdContent] = useState('');
   const [specContent, setSpecContent] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   
+  // Epics state
+  const [epics, setEpics] = useState<EpicResponse[]>([]);
+
   // 프로젝트 목록 및 선택된 프로젝트 ID 상태
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -69,6 +89,34 @@ export const Dashboard: FC = () => {
   const [editingTicket, setEditingTicket] = useState<TicketResponse | null>(null);
   const [editStartDate, setEditStartDate] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
+
+  // 에픽 일정 수정 관련 상태
+  const [editingEpic, setEditingEpic] = useState<EpicResponse | null>(null);
+  const [editEpicStartDate, setEditEpicStartDate] = useState('');
+  const [editEpicDueDate, setEditEpicDueDate] = useState('');
+
+  // 칸반 내 담당 작업 필터링 상태
+  const [myTasksOnly, setMyTasksOnly] = useState(false);
+
+  // QA 상태 필터링 상태
+  const [qaFilter, setQaFilter] = useState<'ALL' | 'UNTESTED' | 'TESTED' | 'APPROVED'>('ALL');
+
+  // 칸반 새 할 일 생성 및 내용 수정 모달 관련 상태
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [ticketFormData, setTicketFormData] = useState({
+    id: undefined as number | undefined,
+    title: '',
+    description: '',
+    status: 'TO_DO',
+    priority: 'P1',
+    assignee_id: null as number | null,
+    epic_ids: [] as number[],
+    need_functional_qa: false,
+    functional_qa_title: '기능 검수',
+    need_quality_qa: false,
+    quality_qa_title: '품질 검수'
+  });
 
   // 전체 팀원 목록 상태
   const [teamMembers, setTeamMembers] = useState<UserResponse[]>([]);
@@ -164,6 +212,20 @@ export const Dashboard: FC = () => {
     }
   };
 
+  // 에픽 목록 로드
+  const fetchEpics = async () => {
+    if (selectedProjectId === null) {
+      setEpics([]);
+      return;
+    }
+    try {
+      const response = await axiosInstance.get(`/epics?project_id=${selectedProjectId}`);
+      setEpics(response.data);
+    } catch (err: any) {
+      console.error('Failed to load epics:', err);
+    }
+  };
+
   // 티켓 목록 로드 API 호출 함수
   const fetchTickets = async () => {
     if (selectedProjectId === null) {
@@ -183,9 +245,10 @@ export const Dashboard: FC = () => {
     fetchProjects();
   }, []);
 
-  // 탭 전환 시 및 선택된 프로젝트 변경 시 티켓 정보 갱신
+  // 탭 전환 시 및 선택된 프로젝트 변경 시 티켓 및 에픽 정보 갱신
   useEffect(() => {
     fetchTickets();
+    fetchEpics();
     if (activeTab === 'kanban') {
       fetchTeamMembers();
     }
@@ -214,8 +277,8 @@ export const Dashboard: FC = () => {
         spec_content: specContent
       });
 
-      const { created_tickets_count, warning_tickets_count, tickets: newTickets } = response.data;
-      setApiSuccess(`성공적으로 WBS 일정을 분해 및 생성했습니다! (태스크 티켓: ${created_tickets_count}개, 상충 경고: ${warning_tickets_count}개)`);
+      const { created_epics_count, warning_epics_count, epics: newEpics } = response.data;
+      setApiSuccess(`성공적으로 WBS 에픽 일정을 분해 및 생성했습니다! (에픽: ${created_epics_count}개, 상충 경고: ${warning_epics_count}개)`);
       
       // 기입 영역 비우기
       setProjectName('');
@@ -227,12 +290,12 @@ export const Dashboard: FC = () => {
       setProjects(projectListResponse.data);
 
       // 신규 프로젝트 ID 추출 및 지정
-      if (newTickets.length > 0) {
-        const newProjId = newTickets[0].project_id;
+      if (newEpics.length > 0) {
+        const newProjId = newEpics[0].project_id;
         setSelectedProjectId(newProjId);
       }
       
-      setTickets(newTickets);
+      setEpics(newEpics);
       
       // 생성 완료 후 2초 뒤에 일정관리(간트 차트) 탭으로 뷰 이동
       setTimeout(() => {
@@ -252,11 +315,186 @@ export const Dashboard: FC = () => {
     }
   };
 
+  const handleOpenEditEpicModal = (epic: EpicResponse) => {
+    setEditingEpic(epic);
+    setEditEpicStartDate(epic.start_date || '');
+    setEditEpicDueDate(epic.due_date || '');
+  };
+
+  const handleSaveEpicDates = async () => {
+    if (!editingEpic) return;
+    try {
+      setLoading(true);
+      await axiosInstance.put(`/epics/${editingEpic.id}`, {
+        start_date: editEpicStartDate || null,
+        due_date: editEpicDueDate || null
+      });
+      setApiSuccess('에픽 일정이 성공적으로 수정되었습니다.');
+      setEditingEpic(null);
+      fetchEpics();
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      setApiError('에픽 일정 수정에 실패했습니다.');
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateQaStatus = async (itemId: number, newStatus: string) => {
+    try {
+      setLoading(true);
+      await axiosInstance.patch(`/qa/items/${itemId}`, {
+        status: newStatus
+      });
+      fetchTickets();
+      setApiSuccess(`검수 상태가 성공적으로 변경되었습니다.`);
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setApiError(err.response.data.detail);
+      } else {
+        setApiError('검수 상태 변경에 실패했습니다.');
+      }
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleEpic = (epicId: number | 'none') => {
+    if (epicId === 'none') {
+      setTicketFormData(prev => ({ ...prev, epic_ids: [] }));
+    } else {
+      const isSelected = ticketFormData.epic_ids.includes(epicId);
+      let newEpicIds: number[];
+      if (isSelected) {
+        newEpicIds = ticketFormData.epic_ids.filter(id => id !== epicId);
+      } else {
+        newEpicIds = [...ticketFormData.epic_ids, epicId];
+      }
+      setTicketFormData(prev => ({ ...prev, epic_ids: newEpicIds }));
+    }
+  };
+
+  const handleOpenCreateModal = () => {
+    setModalMode('create');
+    setTicketFormData({
+      id: undefined,
+      title: '',
+      description: '',
+      status: 'TO_DO',
+      priority: 'P1',
+      assignee_id: null,
+      epic_ids: [],
+      need_functional_qa: false,
+      functional_qa_title: '기능 검수 요건 기술',
+      need_quality_qa: false,
+      quality_qa_title: '품질 검수 요건 기술'
+    });
+    setIsTicketModalOpen(true);
+  };
+
+  const handleOpenEditTicketModal = (ticket: TicketResponse) => {
+    setModalMode('edit');
+    const funcItem = ticket.qa_items.find(item => item.category === 'FUNCTIONAL');
+    const qualItem = ticket.qa_items.find(item => item.category === 'QUALITY');
+    setTicketFormData({
+      id: ticket.id,
+      title: ticket.title,
+      description: ticket.description || '',
+      status: ticket.status,
+      priority: ticket.priority,
+      assignee_id: ticket.assignee_id || null,
+      epic_ids: ticket.epic_ids || [],
+      need_functional_qa: !!funcItem,
+      functional_qa_title: funcItem ? funcItem.title : '기능 검수 요건 기술',
+      need_quality_qa: !!qualItem,
+      quality_qa_title: qualItem ? qualItem.title : '품질 검수 요건 기술'
+    });
+    setIsTicketModalOpen(true);
+  };
+
+  const handleSaveTicket = async () => {
+    if (!ticketFormData.title.trim()) {
+      setApiError("태스크 제목을 입력해주세요.");
+      setTimeout(() => setApiError(''), 3500);
+      return;
+    }
+
+    if (currentUser && currentUser.role !== 'PM') {
+      if (ticketFormData.assignee_id !== null && ticketFormData.assignee_id !== currentUser.id) {
+        setApiError("자신이 아닌 다른 사용자를 담당자로 지정할 수 없습니다.");
+        setTimeout(() => setApiError(''), 3500);
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      const payload = {
+        title: ticketFormData.title,
+        description: ticketFormData.description || null,
+        status: ticketFormData.status,
+        priority: ticketFormData.priority,
+        assignee_id: ticketFormData.assignee_id,
+        epic_ids: ticketFormData.epic_ids,
+        need_functional_qa: ticketFormData.need_functional_qa,
+        functional_qa_title: ticketFormData.need_functional_qa ? ticketFormData.functional_qa_title : null,
+        need_quality_qa: ticketFormData.need_quality_qa,
+        quality_qa_title: ticketFormData.need_quality_qa ? ticketFormData.quality_qa_title : null,
+      };
+
+      if (modalMode === 'create') {
+        await axiosInstance.post('/tickets', {
+          ...payload,
+          project_id: selectedProjectId
+        });
+        setApiSuccess('새 태스크가 생성되었습니다.');
+      } else {
+         await axiosInstance.put(`/tickets/${ticketFormData.id}`, payload);
+        setApiSuccess('태스크가 성공적으로 업데이트되었습니다.');
+      }
+      
+      setIsTicketModalOpen(false);
+      fetchTickets();
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setApiError(err.response.data.detail);
+      } else {
+        setApiError('태스크 저장에 실패했습니다.');
+      }
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== [새로고침 기능] ====================
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([fetchProjects(), fetchTickets(), fetchEpics()]);
+      setApiSuccess('데이터가 새로고침되었습니다.');
+      setTimeout(() => setApiSuccess(''), 2000);
+    } catch (err) {
+      console.error(err);
+      setApiError('새로고침 중 오류가 발생했습니다.');
+      setTimeout(() => setApiError(''), 3000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ==================== [간트 차트용 날짜 연산 함수] ====================
   const getGanttDateRange = () => {
-    // start_date와 due_date가 존재하는 티켓만 필터링
-    const datedTickets = tickets.filter(t => t.start_date && t.due_date);
-    if (datedTickets.length === 0) {
+    // start_date와 due_date가 존재하는 에픽만 필터링
+    const datedEpics = epics.filter(e => e.start_date && e.due_date);
+    if (datedEpics.length === 0) {
       const today = new Date();
       const nextWeek = new Date();
       nextWeek.setDate(today.getDate() + 7);
@@ -272,12 +510,12 @@ export const Dashboard: FC = () => {
       };
     }
 
-    let minDate = new Date(datedTickets[0].start_date!);
-    let maxDate = new Date(datedTickets[0].due_date!);
+    let minDate = new Date(datedEpics[0].start_date!);
+    let maxDate = new Date(datedEpics[0].due_date!);
 
-    datedTickets.forEach(t => {
-      const start = new Date(t.start_date!);
-      const due = new Date(t.due_date!);
+    datedEpics.forEach(e => {
+      const start = new Date(e.start_date!);
+      const due = new Date(e.due_date!);
       if (start < minDate) minDate = start;
       if (due > maxDate) maxDate = due;
     });
@@ -337,21 +575,32 @@ export const Dashboard: FC = () => {
       (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
       
     const matchesPriority = priorityFilter === 'ALL' || t.priority === priorityFilter;
+
+    const matchesMyTasks = !myTasksOnly || (currentUser && t.assignee_id === currentUser.id);
     
-    return matchesSearch && matchesPriority;
+    return matchesSearch && matchesPriority && matchesMyTasks;
   });
 
+  // QA 검수 상태 필터 조건
+  const matchesQaStatus = (item: QAItemResponse) => {
+    if (qaFilter === 'ALL') return true;
+    if (qaFilter === 'UNTESTED') return item.status === 'UNTESTED';
+    if (qaFilter === 'TESTED') return item.status === 'PASS' || item.status === 'FAIL';
+    if (qaFilter === 'APPROVED') return item.status === 'APPROVED';
+    return true;
+  };
+
   // 기능검수 QA 항목 추출
-  const functionalQaItems = filteredTickets.flatMap(t => 
+  const functionalQaItems = tickets.flatMap(t => 
     t.qa_items
-      .filter(item => item.category === 'FUNCTIONAL')
+      .filter(item => item.category === 'FUNCTIONAL' && matchesQaStatus(item))
       .map(item => ({ ...item, ticketTitle: t.title }))
   );
 
   // 품질검수 QA 항목 추출
-  const qualityQaItems = filteredTickets.flatMap(t => 
+  const qualityQaItems = tickets.flatMap(t => 
     t.qa_items
-      .filter(item => item.category === 'QUALITY')
+      .filter(item => item.category === 'QUALITY' && matchesQaStatus(item))
       .map(item => ({ ...item, ticketTitle: t.title }))
   );
 
@@ -359,17 +608,19 @@ export const Dashboard: FC = () => {
     <div className="bg-[#0f172a] border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
       {/* 5대 핵심 탭 메뉴 네비게이션 */}
       <div className="border-b border-slate-800 bg-[#070a13] px-6 py-3 flex flex-wrap gap-2">
-        <button 
-          onClick={() => setActiveTab('project_create')}
-          className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
-            activeTab === 'project_create' 
-              ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
-              : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
-          }`}
-        >
-          <PlusCircle className="w-4 h-4" />
-          프로젝트 생성
-        </button>
+        {currentUser && currentUser.role === 'PM' && (
+          <button 
+            onClick={() => setActiveTab('project_create')}
+            className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+              activeTab === 'project_create' 
+                ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
+                : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
+            }`}
+          >
+            <PlusCircle className="w-4 h-4" />
+            프로젝트 생성
+          </button>
+        )}
         <button 
           onClick={() => setActiveTab('schedule')}
           className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
@@ -418,22 +669,37 @@ export const Dashboard: FC = () => {
 
       {/* 활성 프로젝트 선택 글로벌 드롭다운 (프로젝트 생성 탭이 아닐 경우 상시 표출) */}
       {activeTab !== 'project_create' && (
-        <div className="bg-[#121b2e] border-b border-slate-800 px-6 py-4 flex items-center gap-4">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">선택한 프로젝트:</label>
-          {projects.length > 0 ? (
-            <select
-              value={selectedProjectId || ''}
-              onChange={(e) => setSelectedProjectId(Number(e.target.value))}
-              className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer min-w-[200px]"
+        <div className="bg-[#121b2e] border-b border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">선택한 프로젝트:</label>
+            {projects.length > 0 ? (
+              <select
+                value={selectedProjectId || ''}
+                onChange={(e) => setSelectedProjectId(Number(e.target.value))}
+                className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer min-w-[200px]"
+              >
+                {projects.map((proj) => (
+                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs text-amber-400 font-medium">
+                {currentUser && currentUser.role === 'PM' 
+                  ? "⚠️ 등록된 프로젝트가 없습니다. '프로젝트 생성' 탭에서 새 프로젝트를 등록해주세요." 
+                  : "⚠️ 등록된 프로젝트가 없습니다. PM에게 프로젝트 등록을 요청해 주세요."}
+              </span>
+            )}
+          </div>
+          {projects.length > 0 && (
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="px-3 py-1.5 bg-[#1e293b] hover:bg-[#334155] border border-slate-750 hover:border-slate-600 rounded-lg text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition select-none disabled:opacity-50 shadow-sm"
+              title="데이터 새로고침"
             >
-              {projects.map((proj) => (
-                <option key={proj.id} value={proj.id}>{proj.name}</option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-xs text-amber-400 font-medium">
-              ⚠️ 등록된 프로젝트가 없습니다. '프로젝트 생성' 탭에서 새 프로젝트를 등록해주세요.
-            </span>
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              새로고침
+            </button>
           )}
         </div>
       )}
@@ -442,7 +708,7 @@ export const Dashboard: FC = () => {
       <div className="p-6 md:p-8">
         
         {/* ==================== [1. 프로젝트 생성 탭] ==================== */}
-        {activeTab === 'project_create' && (
+        {activeTab === 'project_create' && currentUser && currentUser.role === 'PM' && (
           <div className="space-y-6">
             <div>
               <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
@@ -542,11 +808,11 @@ export const Dashboard: FC = () => {
               </div>
             )}
 
-            {tickets.length === 0 ? (
+            {epics.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 border border-dashed border-slate-800 rounded-xl bg-[#070a13] text-center px-4">
                 <Calendar className="w-12 h-12 text-slate-600 mb-4 animate-bounce" />
-                <h4 className="text-white font-bold mb-1">생성된 WBS 일정이 없습니다.</h4>
-                <p className="text-slate-500 text-sm mb-4 max-w-sm">프로젝트 생성 탭에서 기획 문서를 입력하고 AI 분석을 가동하여 간트 차트 타임라인을 확인하세요.</p>
+                <h4 className="text-white font-bold mb-1">생성된 WBS 에픽 일정이 없습니다.</h4>
+                <p className="text-slate-500 text-sm mb-4 max-w-sm">프로젝트 생성 탭에서 기획 문서를 입력하고 AI 분석을 가동하여 간트 차트 에픽 타임라인을 확인하세요.</p>
                 <Button variant="primary" onClick={() => setActiveTab('project_create')} className="text-xs">
                   WBS 일정 생성하러 가기
                 </Button>
@@ -556,7 +822,7 @@ export const Dashboard: FC = () => {
                 <div className="min-w-[800px] space-y-4">
                   {/* 타임라인 날짜 눈금 헤더 */}
                   <div className="flex text-slate-400 text-xs font-bold border-b border-slate-850 pb-2">
-                    <div className="w-[280px] flex-shrink-0 text-slate-500 uppercase tracking-wider">개발 태스크 (티켓명)</div>
+                    <div className="w-[280px] flex-shrink-0 text-slate-500 uppercase tracking-wider">개발 에픽 (일정명)</div>
                     <div className="flex-1 relative flex justify-between px-2">
                       {datesArray.map((dateObj, idx) => (
                         <div key={idx} className="flex flex-col items-center flex-1 text-center border-l border-slate-850/50 min-w-[30px]">
@@ -571,38 +837,39 @@ export const Dashboard: FC = () => {
 
                   {/* 간트 가로 막대바 데이터 리스트 */}
                   <div className="divide-y divide-slate-850 space-y-3 pt-3">
-                    {tickets.map((ticket) => {
-                      const hasDates = ticket.start_date && ticket.due_date;
-                      const barStyle = getGanttBarStyle(ticket.start_date, ticket.due_date);
-                      const priorityColor = getPriorityBarColor(ticket.priority);
+                    {epics.map((epic) => {
+                      const hasDates = epic.start_date && epic.due_date;
+                      const barStyle = getGanttBarStyle(epic.start_date, epic.due_date);
+                      const isAiDetected = epic.title.startsWith('[AI-Detected]');
+                      const priorityColor = isAiDetected ? 'from-amber-500 to-amber-600 shadow-amber-500/20' : 'from-blue-500 to-brand-600 shadow-brand-500/20';
                       
                       return (
-                        <div key={ticket.id} className="flex items-center py-2 hover:bg-[#0f172a]/20 rounded transition">
+                        <div key={epic.id} className="flex items-center py-2 hover:bg-[#0f172a]/20 rounded transition">
                           {/* 왼쪽 태스크 라벨 정보 */}
                           <div className="w-[280px] flex-shrink-0 pr-4">
                             <div className="flex items-center gap-2">
-                              {ticket.title.startsWith('[AI-Detected]') ? (
+                              {isAiDetected ? (
                                 <span className="bg-amber-950/40 border border-amber-600/30 text-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                   🤖 경고
                                 </span>
                               ) : (
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded text-white ${
-                                  ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
-                                }`}>
-                                  {ticket.priority}
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white bg-brand-650">
+                                  EPIC
                                 </span>
                               )}
-                              <h4 className="font-medium text-slate-200 text-sm truncate" title={ticket.title}>{ticket.title}</h4>
+                              <h4 className="font-medium text-slate-200 text-sm truncate" title={epic.title}>{epic.title}</h4>
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
-                              <span>시작: {ticket.start_date || '미지정'}</span>
-                              <span>마감: {ticket.due_date || '미지정'}</span>
-                              <button 
-                                onClick={() => handleOpenEditModal(ticket)}
-                                className="text-brand-400 hover:text-brand-300 transition underline cursor-pointer ml-1"
-                              >
-                                기간 수정
-                              </button>
+                              <span>시작: {epic.start_date || '미지정'}</span>
+                              <span>마감: {epic.due_date || '미지정'}</span>
+                              {currentUser && currentUser.role === 'PM' && (
+                                <button 
+                                  onClick={() => handleOpenEditEpicModal(epic)}
+                                  className="text-brand-400 hover:text-brand-300 transition underline cursor-pointer ml-1"
+                                >
+                                  기간 수정
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -619,11 +886,11 @@ export const Dashboard: FC = () => {
                             {hasDates && (
                               <div 
                                 style={barStyle}
-                                onClick={() => handleOpenEditModal(ticket)}
+                                onClick={() => { if(currentUser?.role === 'PM') handleOpenEditEpicModal(epic); }}
                                 className={`absolute h-4 top-1 rounded-full bg-gradient-to-r ${priorityColor} shadow-md flex items-center px-2 text-[9px] text-white font-bold select-none cursor-pointer hover:scale-[1.01] transition transform`}
-                                title={`${ticket.title} (${ticket.start_date} ~ ${ticket.due_date}) - 클릭하여 일정 수정`}
+                                title={`${epic.title} (${epic.start_date} ~ ${epic.due_date})`}
                               >
-                                <span className="truncate">{ticket.title}</span>
+                                <span className="truncate">{epic.title}</span>
                               </div>
                             )}
                           </div>
@@ -661,11 +928,23 @@ export const Dashboard: FC = () => {
                   <option value="P2">P2 (낮음)</option>
                 </select>
               </div>
-              <div className="flex items-center">
+              <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none">
-                  <input type="checkbox" className="rounded bg-[#1e293b] border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4" />
+                  <input 
+                    type="checkbox" 
+                    checked={myTasksOnly}
+                    onChange={(e) => setMyTasksOnly(e.target.checked)}
+                    className="rounded bg-[#1e293b] border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4" 
+                  />
                   내 담당 작업만 보기
                 </label>
+                <Button 
+                  onClick={handleOpenCreateModal} 
+                  disabled={selectedProjectId === null}
+                  className="px-3 py-1.5 flex items-center gap-1 text-xs"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" /> 새 할 일 추가
+                </Button>
               </div>
             </div>
 
@@ -686,9 +965,24 @@ export const Dashboard: FC = () => {
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
                         }`}>{ticket.priority}</span>
+                        <button 
+                          onClick={() => handleOpenEditTicketModal(ticket)} 
+                          className="text-[10px] text-brand-400 hover:text-brand-350 font-semibold transition bg-[#0f172a]/30 border border-slate-700/50 px-1.5 py-0.5 rounded"
+                        >
+                          수정
+                        </button>
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      {ticket.epics && ticket.epics.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {ticket.epics.map(ep => (
+                            <span key={ep.id} className="text-[9px] bg-slate-800 border border-slate-700 text-slate-350 px-1.5 py-0.5 rounded-md truncate max-w-[120px] font-semibold" title={ep.title}>
+                              🏷️ {ep.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* 담당자 지정 UI */}
                       <div className="mt-3 pt-2 border-t border-slate-700/50">
@@ -772,9 +1066,24 @@ export const Dashboard: FC = () => {
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                             ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
                           }`}>{ticket.priority}</span>
+                          <button 
+                            onClick={() => handleOpenEditTicketModal(ticket)} 
+                            className="text-[10px] text-brand-400 hover:text-brand-350 font-semibold transition bg-[#0f172a]/30 border border-slate-700/50 px-1.5 py-0.5 rounded"
+                          >
+                            수정
+                          </button>
                         </div>
                         <h4 className="font-semibold text-white text-sm pr-4">{ticket.title}</h4>
                         {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                        {ticket.epics && ticket.epics.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {ticket.epics.map(ep => (
+                              <span key={ep.id} className="text-[9px] bg-slate-800 border border-slate-700 text-slate-350 px-1.5 py-0.5 rounded-md truncate max-w-[120px] font-semibold" title={ep.title}>
+                                🏷️ {ep.title}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         
                         {/* 담당자 노출 */}
                         {ticket.assignee && (
@@ -822,9 +1131,24 @@ export const Dashboard: FC = () => {
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
                         }`}>{ticket.priority}</span>
+                        <button 
+                          onClick={() => handleOpenEditTicketModal(ticket)} 
+                          className="text-[10px] text-brand-400 hover:text-brand-350 font-semibold transition bg-[#0f172a]/30 border border-slate-700/50 px-1.5 py-0.5 rounded"
+                        >
+                          수정
+                        </button>
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      {ticket.epics && ticket.epics.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {ticket.epics.map(ep => (
+                            <span key={ep.id} className="text-[9px] bg-slate-800 border border-slate-700 text-slate-350 px-1.5 py-0.5 rounded-md truncate max-w-[120px] font-semibold" title={ep.title}>
+                              🏷️ {ep.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* 담당자 노출 */}
                       <div className="mt-2.5 flex items-center gap-1.5 text-xs text-brand-300 bg-brand-950/20 border border-brand-900/30 px-2 py-1 rounded">
@@ -869,9 +1193,24 @@ export const Dashboard: FC = () => {
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
                         }`}>{ticket.priority}</span>
+                        <button 
+                          onClick={() => handleOpenEditTicketModal(ticket)} 
+                          className="text-[10px] text-brand-400 hover:text-brand-350 font-semibold transition bg-[#0f172a]/30 border border-slate-700/50 px-1.5 py-0.5 rounded"
+                        >
+                          수정
+                        </button>
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      {ticket.epics && ticket.epics.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {ticket.epics.map(ep => (
+                            <span key={ep.id} className="text-[9px] bg-slate-800 border border-slate-700 text-slate-350 px-1.5 py-0.5 rounded-md truncate max-w-[120px] font-semibold" title={ep.title}>
+                              🏷️ {ep.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* 담당자 노출 */}
                       {ticket.assignee && (
@@ -909,11 +1248,25 @@ export const Dashboard: FC = () => {
         {/* ==================== [4. 기능검수명세 탭] ==================== */}
         {activeTab === 'functional_qa' && (
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                🔍 기능 검수 명세 체크리스트 (Functional QA checklist)
-              </h3>
-              <p className="text-slate-400 text-sm">각 개발 티켓들과 1:N으로 바인딩되어 생성된 세부 기능 명세 검수 요건입니다.</p>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                  🔍 기능 검수 명세 체크리스트 (Functional QA checklist)
+                </h3>
+                <p className="text-slate-400 text-sm">각 개발 티켓들과 1:N으로 바인딩되어 생성된 세부 기능 명세 검수 요건입니다.</p>
+              </div>
+              <div className="flex-shrink-0">
+                <select 
+                  value={qaFilter}
+                  onChange={(e) => setQaFilter(e.target.value as any)}
+                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  <option value="ALL">검수 상태 (전체)</option>
+                  <option value="UNTESTED">검수대기 (UNTESTED)</option>
+                  <option value="TESTED">검수완료 (PASS / FAIL)</option>
+                  <option value="APPROVED">승인완료 (APPROVED)</option>
+                </select>
+              </div>
             </div>
             <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-hidden shadow-lg">
               <table className="w-full text-left text-sm">
@@ -922,7 +1275,7 @@ export const Dashboard: FC = () => {
                     <th className="px-6 py-3.5 font-semibold">검수 ID</th>
                     <th className="px-6 py-3.5 font-semibold">연계 칸반 티켓</th>
                     <th className="px-6 py-3.5 font-semibold">검수 검증 동작 조건</th>
-                    <th className="px-6 py-3.5 font-semibold text-center">검수 상태</th>
+                    <th className="px-6 py-3.5 font-semibold text-center">검수 상태 및 관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850 text-slate-350">
@@ -934,15 +1287,43 @@ export const Dashboard: FC = () => {
                       </td>
                       <td className="px-6 py-4 font-medium">{item.title}</td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold select-none ${
-                          item.status === 'PASS' 
-                            ? 'bg-green-950/40 border border-green-600/40 text-green-300' 
-                            : item.status === 'FAIL' 
-                              ? 'bg-red-950/40 border border-red-600/40 text-red-300' 
-                              : 'bg-slate-800/40 border border-slate-600/40 text-slate-400'
-                        }`}>
-                          {item.status}
-                        </span>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold select-none ${
+                            item.status === 'PASS' 
+                              ? 'bg-green-950/40 border border-green-600/40 text-green-300' 
+                              : item.status === 'FAIL' 
+                                ? 'bg-red-950/40 border border-red-600/40 text-red-300' 
+                                : item.status === 'APPROVED'
+                                  ? 'bg-blue-950/40 border border-blue-600/40 text-blue-300'
+                                  : 'bg-slate-800/40 border border-slate-600/40 text-slate-400'
+                          }`}>
+                            {item.status}
+                          </span>
+                          {currentUser && currentUser.role === 'QA' && item.status !== 'APPROVED' && (
+                            <div className="flex gap-1">
+                              <button 
+                                onClick={() => handleUpdateQaStatus(item.id, 'PASS')}
+                                className="px-2 py-0.5 bg-green-700 hover:bg-green-600 text-white rounded text-[11px] font-semibold transition"
+                              >
+                                성공
+                              </button>
+                              <button 
+                                onClick={() => handleUpdateQaStatus(item.id, 'FAIL')}
+                                className="px-2 py-0.5 bg-red-700 hover:bg-red-600 text-white rounded text-[11px] font-semibold transition"
+                              >
+                                실패
+                              </button>
+                            </div>
+                          )}
+                          {currentUser && currentUser.role === 'PM' && item.status === 'PASS' && (
+                            <button 
+                              onClick={() => handleUpdateQaStatus(item.id, 'APPROVED')}
+                              className="px-2 py-0.5 bg-blue-700 hover:bg-blue-600 text-white rounded text-[11px] font-semibold transition"
+                            >
+                              승인
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -962,11 +1343,25 @@ export const Dashboard: FC = () => {
         {/* ==================== [5. 품질검수명세 탭] ==================== */}
         {activeTab === 'quality_qa' && (
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                🛡️ 품질 검수 명세 체크리스트 (Quality QA Checklist)
-              </h3>
-              <p className="text-slate-400 text-sm">성능, 보안 및 코딩 스펙 제약 조건에 대한 품질 검증 가이드 리스트입니다.</p>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                  🛡️ 품질 검수 명세 체크리스트 (Quality QA Checklist)
+                </h3>
+                <p className="text-slate-400 text-sm">성능, 보안 및 코딩 스펙 제약 조건에 대한 품질 검증 가이드 리스트입니다.</p>
+              </div>
+              <div className="flex-shrink-0">
+                <select 
+                  value={qaFilter}
+                  onChange={(e) => setQaFilter(e.target.value as any)}
+                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  <option value="ALL">검수 상태 (전체)</option>
+                  <option value="UNTESTED">검수대기 (UNTESTED)</option>
+                  <option value="TESTED">검수완료 (PASS / FAIL)</option>
+                  <option value="APPROVED">승인완료 (APPROVED)</option>
+                </select>
+              </div>
             </div>
             <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-hidden shadow-lg">
               <table className="w-full text-left text-sm">
@@ -975,7 +1370,7 @@ export const Dashboard: FC = () => {
                     <th className="px-6 py-3.5 font-semibold">검수 ID</th>
                     <th className="px-6 py-3.5 font-semibold">연계 칸반 티켓</th>
                     <th className="px-6 py-3.5 font-semibold">품질 검증 세부 요건</th>
-                    <th className="px-6 py-3.5 font-semibold text-center">검수 상태</th>
+                    <th className="px-6 py-3.5 font-semibold text-center">검수 상태 및 관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850 text-slate-350">
@@ -987,15 +1382,43 @@ export const Dashboard: FC = () => {
                       </td>
                       <td className="px-6 py-4 font-medium">{item.title}</td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold select-none ${
-                          item.status === 'PASS' 
-                            ? 'bg-green-950/40 border border-green-600/40 text-green-300' 
-                            : item.status === 'FAIL' 
-                              ? 'bg-red-950/40 border border-red-600/40 text-red-300' 
-                              : 'bg-slate-800/40 border border-slate-600/40 text-slate-400'
-                        }`}>
-                          {item.status}
-                        </span>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold select-none ${
+                            item.status === 'PASS' 
+                              ? 'bg-green-950/40 border border-green-600/40 text-green-300' 
+                              : item.status === 'FAIL' 
+                                ? 'bg-red-950/40 border border-red-600/40 text-red-300' 
+                                : item.status === 'APPROVED'
+                                  ? 'bg-blue-950/40 border border-blue-600/40 text-blue-300'
+                                  : 'bg-slate-800/40 border border-slate-600/40 text-slate-400'
+                          }`}>
+                            {item.status}
+                          </span>
+                          {currentUser && currentUser.role === 'QA' && item.status !== 'APPROVED' && (
+                            <div className="flex gap-1">
+                              <button 
+                                onClick={() => handleUpdateQaStatus(item.id, 'PASS')}
+                                className="px-2 py-0.5 bg-green-700 hover:bg-green-600 text-white rounded text-[11px] font-semibold transition"
+                              >
+                                성공
+                              </button>
+                              <button 
+                                onClick={() => handleUpdateQaStatus(item.id, 'FAIL')}
+                                className="px-2 py-0.5 bg-red-700 hover:bg-red-600 text-white rounded text-[11px] font-semibold transition"
+                              >
+                                실패
+                              </button>
+                            </div>
+                          )}
+                          {currentUser && currentUser.role === 'PM' && item.status === 'PASS' && (
+                            <button 
+                              onClick={() => handleUpdateQaStatus(item.id, 'APPROVED')}
+                              className="px-2 py-0.5 bg-blue-700 hover:bg-blue-600 text-white rounded text-[11px] font-semibold transition"
+                            >
+                              승인
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1014,14 +1437,14 @@ export const Dashboard: FC = () => {
 
       </div>
 
-      {/* 일정 수정 모달 */}
-      {editingTicket && (
+      {/* 에픽 일정 수정 모달 */}
+      {editingEpic && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
             <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">📅 일정 기간 수정</h3>
+              <h3 className="text-base font-bold text-white">📅 에픽 일정 기간 수정</h3>
               <button 
-                onClick={() => setEditingTicket(null)}
+                onClick={() => setEditingEpic(null)}
                 className="text-slate-400 hover:text-slate-200 transition font-bold"
               >
                 ✕
@@ -1030,9 +1453,9 @@ export const Dashboard: FC = () => {
             
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">태스크명</label>
-                <div className="bg-slate-900/50 border border-slate-800 text-slate-300 px-4 py-2.5 rounded-lg text-sm font-semibold truncate" title={editingTicket.title}>
-                  {editingTicket.title}
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">에픽명</label>
+                <div className="bg-slate-900/50 border border-slate-800 text-slate-300 px-4 py-2.5 rounded-lg text-sm font-semibold truncate" title={editingEpic.title}>
+                  {editingEpic.title}
                 </div>
               </div>
 
@@ -1041,8 +1464,8 @@ export const Dashboard: FC = () => {
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">시작일</label>
                   <input 
                     type="date" 
-                    value={editStartDate}
-                    onChange={(e) => setEditStartDate(e.target.value)}
+                    value={editEpicStartDate}
+                    onChange={(e) => setEditEpicStartDate(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
                   />
                 </div>
@@ -1050,8 +1473,8 @@ export const Dashboard: FC = () => {
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">마감일</label>
                   <input 
                     type="date" 
-                    value={editDueDate}
-                    onChange={(e) => setEditDueDate(e.target.value)}
+                    value={editEpicDueDate}
+                    onChange={(e) => setEditEpicDueDate(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
                   />
                 </div>
@@ -1060,13 +1483,206 @@ export const Dashboard: FC = () => {
 
             <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
               <button 
-                onClick={() => setEditingTicket(null)}
+                onClick={() => setEditingEpic(null)}
                 className="px-4 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
               >
                 취소
               </button>
               <button 
-                onClick={handleSaveDates}
+                onClick={handleSaveEpicDates}
+                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 새 할일 추가 / 내용 수정 모달 */}
+      {isTicketModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">
+                {modalMode === 'create' ? '➕ 새 할 일 추가' : '📝 할 일 수정'}
+              </h3>
+              <button 
+                onClick={() => setIsTicketModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 transition font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">할 일 제목</label>
+                <input 
+                  type="text" 
+                  value={ticketFormData.title}
+                  onChange={(e) => setTicketFormData({ ...ticketFormData, title: e.target.value })}
+                  placeholder="태스크 제목을 입력하세요."
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">설명</label>
+                <textarea 
+                  value={ticketFormData.description}
+                  onChange={(e) => setTicketFormData({ ...ticketFormData, description: e.target.value })}
+                  placeholder="세부 설명을 입력하세요."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">상태</label>
+                  <select 
+                    value={ticketFormData.status}
+                    onChange={(e) => setTicketFormData({ ...ticketFormData, status: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  >
+                    <option value="TO_DO">To Do (대기)</option>
+                    <option value="IN_PROGRESS">In Progress (진행 중)</option>
+                    <option value="TO_REVIEW">To Review (검토 필요)</option>
+                    <option value="DONE">Done (완료)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">우선순위</label>
+                  <select 
+                    value={ticketFormData.priority}
+                    onChange={(e) => setTicketFormData({ ...ticketFormData, priority: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  >
+                    <option value="P0">P0 (긴급)</option>
+                    <option value="P1">P1 (보통)</option>
+                    <option value="P2">P2 (낮음)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">담당자 지정</label>
+                  {currentUser && currentUser.role === 'PM' ? (
+                    <select
+                      value={ticketFormData.assignee_id || ''}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, assignee_id: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="">담당자 지정 안 함</option>
+                      {teamMembers.map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} ({member.role})
+                        </option>
+                      ))}
+                    </select>
+                  ) : currentUser ? (
+                    <select
+                      value={ticketFormData.assignee_id || ''}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, assignee_id: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="">담당자 지정 안 함</option>
+                      <option value={currentUser.id}>{currentUser.name} (나)</option>
+                      {ticketFormData.assignee_id && ticketFormData.assignee_id !== currentUser.id && (
+                        <option value={ticketFormData.assignee_id} disabled>
+                          {teamMembers.find(m => m.id === ticketFormData.assignee_id)?.name || '기타 담당자'}
+                        </option>
+                      )}
+                    </select>
+                  ) : (
+                    <div className="text-xs text-slate-500">로그인 필요</div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">연계 에픽 (중복 선택)</label>
+                  <div className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 space-y-2 max-h-[110px] overflow-y-auto">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={ticketFormData.epic_ids.length === 0}
+                        onChange={() => handleToggleEpic('none')}
+                        className="rounded bg-slate-950 border-slate-700 text-brand-500 focus:ring-brand-500 w-3.5 h-3.5 cursor-pointer" 
+                      />
+                      <span>에픽 연결 없음</span>
+                    </label>
+                    {epics.map(epic => (
+                      <label key={epic.id} className="flex items-center gap-2 text-xs font-semibold text-slate-300 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          checked={ticketFormData.epic_ids.includes(epic.id)}
+                          onChange={() => handleToggleEpic(epic.id)}
+                          className="rounded bg-slate-950 border-slate-700 text-brand-500 focus:ring-brand-500 w-3.5 h-3.5 cursor-pointer" 
+                        />
+                        <span className="truncate" title={epic.title}>{epic.title}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 space-y-3">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">🛠️ QA 검수 체크리스트 설정</label>
+                
+                <div className="space-y-2 bg-[#121b2e] p-3 rounded-lg border border-slate-800">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={ticketFormData.need_functional_qa}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, need_functional_qa: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4" 
+                    />
+                    기능검수 필요
+                  </label>
+                  {ticketFormData.need_functional_qa && (
+                    <input 
+                      type="text"
+                      value={ticketFormData.functional_qa_title}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, functional_qa_title: e.target.value })}
+                      placeholder="기능 검증 요건을 구체적으로 입력하세요."
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-2 bg-[#121b2e] p-3 rounded-lg border border-slate-800">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={ticketFormData.need_quality_qa}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, need_quality_qa: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4" 
+                    />
+                    품질검수 필요
+                  </label>
+                  {ticketFormData.need_quality_qa && (
+                    <input 
+                      type="text"
+                      value={ticketFormData.quality_qa_title}
+                      onChange={(e) => setTicketFormData({ ...ticketFormData, quality_qa_title: e.target.value })}
+                      placeholder="품질 검증 요건을 구체적으로 입력하세요."
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsTicketModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 text-slate-350 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
+              >
+                취소
+              </button>
+              <button 
+                onClick={handleSaveTicket}
                 className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
               >
                 저장

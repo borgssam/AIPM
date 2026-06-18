@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey, Table
 from sqlalchemy.orm import relationship
 
 # database.py에서 Base를 가져옴
@@ -31,6 +31,7 @@ class QAItemStatus(str, enum.Enum):
     UNTESTED = "UNTESTED"
     PASS = "PASS"
     FAIL = "FAIL"
+    APPROVED = "APPROVED"
 
 # --- User ORM 모델 ---
 class User(Base):
@@ -61,6 +62,33 @@ class Project(Base):
 
     # 양방향 관계 설정 (프로젝트 삭제 시 종속된 모든 티켓이 CASCADE 자동 삭제되도록 cascade 옵션 부여)
     tickets = relationship("KanbanTicket", back_populates="project", cascade="all, delete-orphan")
+    epics = relationship("Epic", back_populates="project", cascade="all, delete-orphan")
+
+# --- Epic-Ticket Many-to-Many Association Table ---
+ticket_epic_association = Table(
+    'ticket_epic_association',
+    Base.metadata,
+    Column('ticket_id', Integer, ForeignKey('kanban_tickets.id', ondelete='CASCADE'), primary_key=True),
+    Column('epic_id', Integer, ForeignKey('epics.id', ondelete='CASCADE'), primary_key=True)
+)
+
+# --- Epic ORM 모델 ---
+class Epic(Base):
+    __tablename__ = "epics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)
+    due_date = Column(Date, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 양방향 관계 설정
+    project = relationship("Project", back_populates="epics")
+    tickets = relationship("KanbanTicket", secondary=ticket_epic_association, back_populates="epics")
 
 
 # --- KanbanTicket ORM 모델 ---
@@ -88,6 +116,13 @@ class KanbanTicket(Base):
     
     # 프로젝트 관계 설정
     project = relationship("Project", back_populates="tickets")
+    
+    # 에픽 관계 설정 (Many-to-Many)
+    epics = relationship("Epic", secondary=ticket_epic_association, back_populates="tickets")
+    
+    @property
+    def epic_ids(self):
+        return [e.id for e in self.epics]
     
     # cascade="all, delete-orphan"을 통해 티켓 삭제 시 매핑된 QA 항목 자동 삭제 보장
     qa_items = relationship("QAInspectionItem", back_populates="ticket", cascade="all, delete-orphan")

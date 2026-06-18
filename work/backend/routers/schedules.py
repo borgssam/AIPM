@@ -93,43 +93,30 @@ def generate_schedule(
             detail="명세서 파싱에 실패했습니다. 파일 형식 및 내용을 다시 확인해주세요."
         )
 
-    tickets_data = analysis_result.get("tickets", [])
+    epics_data = analysis_result.get("epics", [])
     conflicts_data = analysis_result.get("conflicts", [])
 
-    created_tickets = []
+    created_epics = []
     warning_count = 0
 
     try:
-        # 4.1 개발 티켓 및 QA 매핑 저장 (DB 트랜잭션 관리)
-        for ticket_item in tickets_data:
-            start_d = parse_date(ticket_item.get("start_date"), 0)
-            due_d = parse_date(ticket_item.get("due_date"), 3)
+        # 4.1 개발 에픽 일정 저장
+        for epic_item in epics_data:
+            start_d = parse_date(epic_item.get("start_date"), 0)
+            due_d = parse_date(epic_item.get("due_date"), 5)
             
-            db_ticket = models.KanbanTicket(
+            db_epic = models.Epic(
                 project_id=project.id,
-                title=ticket_item.get("title", "Generated Task"),
-                description=ticket_item.get("description", ""),
-                status=models.TicketStatus.TO_DO.value,
-                priority=ticket_item.get("priority", models.TicketPriority.P1.value),
+                title=epic_item.get("title", "Generated Epic"),
+                description=epic_item.get("description", ""),
                 start_date=start_d,
                 due_date=due_d
             )
-            db.add(db_ticket)
-            db.flush()  # ticket.id 값을 생성하기 위해 flush 실행
-            
-            # QA 검수 항목 1:N 자동 연계 생성
-            for qa_item in ticket_item.get("qa_items", []):
-                db_qa = models.QAInspectionItem(
-                    ticket_id=db_ticket.id,
-                    category=qa_item.get("category", "FUNCTIONAL"),
-                    title=qa_item.get("title", "Inspect functionality"),
-                    status=models.QAItemStatus.UNTESTED.value
-                )
-                db.add(db_qa)
-            
-            created_tickets.append(db_ticket)
+            db.add(db_epic)
+            db.flush()
+            created_epics.append(db_epic)
 
-        # 4.2 상충 경고 티켓 인서트 및 실시간 슬랙 알림 발송
+        # 4.2 상충 경고 에픽 인서트 및 실시간 슬랙 알림 발송
         for conflict_item in conflicts_data:
             start_d = parse_date(conflict_item.get("start_date"), 0)
             due_d = parse_date(conflict_item.get("due_date"), 0)
@@ -138,12 +125,10 @@ def generate_schedule(
             if not title.startswith("[AI-Detected]"):
                 title = f"[AI-Detected] {title}"
                 
-            db_conflict = models.KanbanTicket(
+            db_conflict = models.Epic(
                 project_id=project.id,
                 title=title,
                 description=conflict_item.get("description", "logical contradiction detected in design spec."),
-                status=models.TicketStatus.TO_REVIEW.value,  # To Review 컬럼으로 강제 적재
-                priority=models.TicketPriority.P0.value,     # P0 Blocker 설정
                 start_date=start_d,
                 due_date=due_d
             )
@@ -151,23 +136,23 @@ def generate_schedule(
             db.flush()
             
             warning_count += 1
-            created_tickets.append(db_conflict)
+            created_epics.append(db_conflict)
             
             # 실시간 슬랙 웹훅 발송 트리거
-            slack_msg = f"⚠️ [AI-Detected] 기획 충돌 이슈가 등록되었습니다. 칸반보드를 확인해 주세요.\n*이슈 제목*: {title}\n*상세 내용*: {db_conflict.description}"
+            slack_msg = f"⚠️ [AI-Detected] 기획 충돌 이슈가 등록되었습니다. WBS 타임라인을 확인해 주세요.\n*이슈 제목*: {title}\n*상세 내용*: {db_conflict.description}"
             send_slack_notification(db, slack_msg)
 
         # 트랜잭션 커밋 확정
         db.commit()
         
         # 관계형 필드를 최신 상태로 바인딩하여 응답하기 위해 refresh
-        for t in created_tickets:
-            db.refresh(t)
+        for e in created_epics:
+            db.refresh(e)
             
         return {
-            "created_tickets_count": len(tickets_data),
-            "warning_tickets_count": warning_count,
-            "tickets": created_tickets
+            "created_epics_count": len(epics_data),
+            "warning_epics_count": warning_count,
+            "epics": created_epics
         }
 
     except Exception as db_err:

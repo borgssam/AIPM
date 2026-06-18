@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import engine, Base, get_db
 import models
-from routers import auth, users, schedules, tickets, projects
+from routers import auth, users, schedules, tickets, projects, epics, qa
 
 # 백엔드 기동 시 테이블이 누락된 경우 자동 빌드되도록 호출
 Base.metadata.create_all(bind=engine)
@@ -30,6 +30,8 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(schedules.router, prefix="/api/v1/schedules", tags=["Schedules"])
 app.include_router(tickets.router, prefix="/api/v1/tickets", tags=["Tickets"])
 app.include_router(projects.router, prefix="/api/v1/projects", tags=["Projects"])
+app.include_router(epics.router, prefix="/api/v1/epics", tags=["Epics"])
+app.include_router(qa.router, prefix="/api/v1/qa", tags=["QA"])
 
 @app.get("/")
 def read_root():

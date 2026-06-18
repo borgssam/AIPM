@@ -29,7 +29,8 @@ def init_db():
             {"username": "dev1", "password": "12345678", "name": "개발자1", "role": "DEVELOPER"},
             {"username": "dev2", "password": "12345678", "name": "개발자2", "role": "DEVELOPER"},
             {"username": "dev3", "password": "12345678", "name": "개발자3", "role": "DEVELOPER"},
-            {"username": "dev4", "password": "12345678", "name": "개발자4", "role": "DEVELOPER"}
+            {"username": "dev4", "password": "12345678", "name": "개발자4", "role": "DEVELOPER"},
+            {"username": "qaqa", "password": "12345678", "name": "이검수", "role": "QA"}
         ]
 
         for u_data in seed_users:
