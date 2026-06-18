@@ -1,0 +1,316 @@
+# 데이터베이스 및 API 설계서 (DB & API Design Plan)
+
+본 문서는 `specs/ai_pm_spec.md` 요구사항에 정의된 **AI PM Phase 1** 구현을 위한 데이터베이스 스키마와 FastAPI 핵심 API 명세서입니다. 스케줄 자동 일괄 생성, UI 대시보드 연동, 사용자 인증(JWT), **우선순위 관리 및 설정 테이블, 백엔드 하드 게이트 검증 정책**이 추가되어 최종 확정되었습니다.
+
+---
+
+## 1. 데이터베이스 설계 (Database Schema Design)
+
+SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은 표준 ANSI SQL 타입을 기준으로 하며, ORM(SQLAlchemy)을 통해 데이터베이스 엔진에 무관하게 작동하도록 구조화합니다.
+
+### 1.1 테이블 구조
+
+#### 1) `users` 테이블 (회원 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 사용자 식별 고유 ID |
+| **username** | `VARCHAR(50)` | `String(50)` | UNIQUE, NOT NULL | 사용자 로그인 고유 ID |
+| **hashed_password** | `VARCHAR(255)` | `String(255)` | NOT NULL | 단방향 해싱 암호화된 비밀번호 |
+| **name** | `VARCHAR(100)` | `String(100)` | NOT NULL | 사용자 실명 (예: `홍길동`) |
+| **role** | `VARCHAR(50)` | `String(50)` | NOT NULL | 시스템 역할 (`PM`, `DEVELOPER`, `DESIGNER`, `QA`) |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 정보 수정 일시 |
+
+#### 2) `kanban_tickets` 테이블 (일정 및 칸반 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 티켓 식별 고유 ID |
+| **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 티켓 제목 |
+| **description** | `TEXT` | `Text` | NULLABLE | 태스크 상세 내용 또는 논리 상충에 대한 상세 원인 |
+| **status** | `VARCHAR(50)` | `String(50)` | NOT NULL, Default: 'TO_DO' | 칸반 보드 내 카드 상태 (`TO_DO`, `TO_REVIEW`, `IN_PROGRESS`, `DONE`) |
+| **assignee_id** | `INTEGER` | `Integer` | Foreign Key (users.id), NULLABLE | 배정된 담당 사용자 ID |
+| **priority** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'P1' | 작업 우선순위 (`P0`, `P1`, `P2`) |
+| **resolution** | `TEXT` | `Text` | NULLABLE | 담당 팀원이 입력한 스펙 해결 방안 텍스트 |
+| **start_date** | `DATE` | `Date` | NULLABLE | 작업 시작 예정일 (YYYY-MM-DD) |
+| **due_date** | `DATE` | `Date` | NULLABLE | 작업 마감 예정일 (YYYY-MM-DD) |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 티켓 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 티켓 최종 수정 일시 (자동 갱신) |
+
+#### 3) `qa_inspection_items` 테이블 (기능/품질 검수 명세 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 검수 항목 고유 ID |
+| **ticket_id** | `INTEGER` | `Integer` | Foreign Key (kanban_tickets.id), NULLABLE | 매핑된 칸반 티켓 ID (수동/자동 연동) |
+| **category** | `VARCHAR(50)` | `String(50)` | NOT NULL | 검수 종류 구분 (`FUNCTIONAL`: 기능검수, `QUALITY`: 품질검수) |
+| **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 검수 요건 내용 |
+| **status** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'UNTESTED' | 검수 상태 (`UNTESTED`, `PASS`, `FAIL`) |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 검수 항목 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 상태 업데이트 일시 |
+
+#### 4) `project_settings` 테이블 (시스템 전역 설정 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 설정 인덱스 ID |
+| **key** | `VARCHAR(100)` | `String(100)` | UNIQUE, NOT NULL | 설정 키 (예: `slack_webhook_url`) |
+| **value** | `TEXT` | `Text` | NULLABLE | 설정 값 (예: `https://hooks.slack.com/services/...`) |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 변경 일시 |
+
+---
+
+### 1.2 SQLAlchemy ORM 모델 정의 (Python)
+```python
+import enum
+from datetime import datetime, date
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship
+
+Base = declarative_base()
+
+# 역할(Role) Enum 정의
+class UserRole(str, enum.Enum):
+    PM = "PM"
+    DEVELOPER = "DEVELOPER"
+    DESIGNER = "DESIGNER"
+    QA = "QA"
+
+# 칸반 티켓 상태 Enum
+class TicketStatus(str, enum.Enum):
+    TO_DO = "TO_DO"
+    TO_REVIEW = "TO_REVIEW"
+    IN_PROGRESS = "IN_PROGRESS"
+    DONE = "DONE"
+
+# 티켓 우선순위 Enum
+class TicketPriority(str, enum.Enum):
+    P0 = "P0"  # 긴급/차단막 (Emergency/Blocker)
+    P1 = "P1"  # 보통/핵심 (Normal)
+    P2 = "P2"  # 낮음 (Low/Nice to have)
+
+# QA 검수 상태 Enum
+class QAItemStatus(str, enum.Enum):
+    UNTESTED = "UNTESTED"
+    PASS = "PASS"
+    FAIL = "FAIL"
+
+# --- User ORM 모델 ---
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    name = Column(String(100), nullable=False)
+    role = Column(String(50), nullable=False, default=UserRole.DEVELOPER.value)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tickets = relationship("KanbanTicket", back_populates="assignee")
+
+# --- KanbanTicket ORM 모델 ---
+class KanbanTicket(Base):
+    __tablename__ = "kanban_tickets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default=TicketStatus.TO_DO.value)
+    priority = Column(String(20), nullable=False, default=TicketPriority.P1.value)
+    
+    assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolution = Column(Text, nullable=True)
+    
+    start_date = Column(Date, nullable=True)
+    due_date = Column(Date, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 관계 설정
+    assignee = relationship("User", back_populates="tickets")
+    qa_items = relationship("QAInspectionItem", back_populates="ticket", cascade="all, delete-orphan")
+
+# --- QAInspectionItem ORM 모델 ---
+class QAInspectionItem(Base):
+    __tablename__ = "qa_inspection_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticket_id = Column(Integer, ForeignKey("kanban_tickets.id", ondelete="CASCADE"), nullable=True)
+    category = Column(String(50), nullable=False)  # 'FUNCTIONAL' or 'QUALITY'
+    title = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default=QAItemStatus.UNTESTED.value)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 관계 설정
+    ticket = relationship("KanbanTicket", back_populates="qa_items")
+
+# --- ProjectSetting ORM 모델 ---
+class ProjectSetting(Base):
+    __tablename__ = "project_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), unique=True, nullable=False)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+```
+
+---
+
+## 2. API 엔드포인트 설계 (FastAPI API Design)
+
+### 2.1 Pydantic 스키마 정의 (DTO)
+```python
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from datetime import datetime, date
+
+# --- 1. 회원 및 인증 관련 스키마 ---
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=4, max_length=50, example="dev_kim")
+    password: str = Field(..., min_length=6, max_length=100, example="securepassword")
+    name: str = Field(..., max_length=100, example="김개발")
+    role: str = Field(..., example="DEVELOPER")
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    name: str
+    role: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+# --- 2. QA 검수 항목 스키마 ---
+class QAItemResponse(BaseModel):
+    id: int
+    ticket_id: Optional[int] = None
+    category: str
+    title: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class QAItemUpdate(BaseModel):
+    status: str = Field(..., example="PASS")
+
+# --- 3. Kanban 티켓 스키마 ---
+class TicketResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    status: str
+    priority: str
+    assignee_id: Optional[int] = None
+    assignee: Optional[UserResponse] = None
+    resolution: Optional[str] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+    created_at: datetime
+    updated_at: datetime
+    qa_items: List[QAItemResponse] = []  # 티켓 상세 조회 시 QA 항목 바인딩 반환
+
+    class Config:
+        orm_mode = True
+
+class ScheduleGenerateRequest(BaseModel):
+    prd_content: str = Field(..., example="# 요구명세서\n...")
+    spec_content: str = Field(..., example="# 기능명세서\n...")
+
+class ScheduleGenerateResponse(BaseModel):
+    created_tickets_count: int
+    warning_tickets_count: int
+    tickets: List[TicketResponse]
+
+class TicketUpdate(BaseModel):
+    assignee_id: Optional[int] = Field(None, example=2)
+    status: Optional[str] = Field(None, example="IN_PROGRESS")
+    priority: Optional[str] = Field(None, example="P0")
+    resolution: Optional[str] = Field(None, example="임시 기재 해결 방안")
+    start_date: Optional[date] = Field(None, example="2026-06-18")
+    due_date: Optional[date] = Field(None, example="2026-06-30")
+
+class TicketResolve(BaseModel):
+    resolution: str = Field(..., example="모든 품질 규격을 만족하여 조율을 완료함.")
+
+# --- 4. 전역 시스템 설정 스키마 ---
+class ProjectSettingResponse(BaseModel):
+    id: int
+    key: str
+    value: Optional[str] = None
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class ProjectSettingUpdate(BaseModel):
+    value: str = Field(..., example="https://hooks.slack.com/services/...")
+```
+
+---
+
+### 2.2 핵심 API 엔드포인트 목록
+
+모든 API 호출 시 JWT 만료 검증이 수반되며, 만료 시 백엔드는 즉시 **`401 Unauthorized`** 응답을 반환합니다.
+
+#### [기능 5] 사용자 가입, 로그인 및 팀원 조회
+*   `POST /api/v1/auth/signup` : 회원 가입 (비밀번호 단방향 해싱).
+*   `POST /api/v1/auth/login` : 로그인 (JWT 액세스 토큰 발행, 만료시간 적용).
+*   `GET /api/v1/users` : 전체 가입 팀원 목록 조회 (드롭다운 구성용, JWT 필요).
+
+#### [기능 1] 요구명세서 기반 스케줄 자동 생성 및 이슈 등록
+*   **엔드포인트:** `POST /api/v1/schedules/generate`
+*   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`)
+*   **에러 처리 (파싱 실패):** 명세 텍스트 파싱 및 AI WBS 분해 실패 시 **`400 Bad Request`** (메시지: `"명세서 파싱에 실패했습니다. 파일 형식 및 내용을 다시 확인해주세요."`)를 반환합니다.
+*   **구현 아키텍처:** 
+    1. AI(Gemini)에 데이터를 제공하여 태스크 및 티켓과 연계된 QA 항목 리스트를 도출합니다.
+    2. 생성된 각 티켓 정보(`title`, `description`, `start_date`, `due_date`, `priority`)를 DB에 벌크 삽입합니다.
+    3. 새로 생성된 각 티켓 ID를 외래키(`ticket_id`)로 설정하여 연계된 `qa_inspection_items`를 DB에 벌크 삽입하여 무결성을 확보합니다.
+    4. 논리 상충 감지 시 `TO_REVIEW` 상태의 `[AI-Detected]` 카드를 추가로 삽입하고 슬랙 알림을 쏩니다.
+
+#### [기능 2] 티켓 상태/정보 수정 (담당자 지정, 일정/우선순위 변경 등)
+*   **엔드포인트:** `PATCH /api/v1/tickets/{ticket_id}`
+*   **요청 바디:** `TicketUpdate`
+*   **보안/RBAC:** JWT 인증 필요.
+    *   `assignee_id` 수정은 오직 `PM`만 가능합니다. (PM이 아닌 사용자가 요청 시 `403 Forbidden` 발생)
+    *   우선순위, 일정, 상태 갱신은 해당 카드의 기존 배정자(`assignee_id`) 또는 `PM` 권한을 가진 사람만 요청 가능합니다.
+
+#### [기능 3] 조율 완료 및 해결 방안 등록 (백엔드 하드 게이트 검증)
+*   **엔드포인트:** `POST /api/v1/tickets/{ticket_id}/resolve`
+*   **요청 바디:** `TicketResolve`
+*   **보안/RBAC:** JWT 인증 필요. 티켓 담당자 또는 `PM`만 완료 처리가 가능합니다.
+*   **하드 게이트 검증:** 
+    *   완료 처리 시, DB를 조회하여 해당 `ticket_id`에 매핑된 모든 `qa_inspection_items`의 상태가 **`PASS`**인지 판별합니다.
+    *   하나라도 `PASS`가 아니거나 검사 항목이 완료되지 않은 상태라면, 백엔드는 즉시 **`400 Bad Request`** (메시지: `"모든 연계 검수 체크리스트 항목이 완료(PASS) 상태여야만 티켓을 완료할 수 있습니다."`)를 반환하며 상태 변경(`DONE` 전이)을 거부합니다.
+
+#### [기타] 칸반보드 및 일정관리용 전체/개별 티켓 조회
+*   `GET /api/v1/tickets` : 카드 검색 키워드 및 우선순위 필터링 쿼리 파라미터(`search`, `priority`, `assignee_id`) 지원.
+*   `GET /api/v1/tickets/{ticket_id}` : 개별 티켓 상세 정보 및 소속 `qa_items` 리스트 반환.
+
+#### [기능 4] 기능/품질 검수 명세 체크리스트 전체 조회 및 토글
+*   `GET /api/v1/qa/items` : 검수 항목 리스트 조회. `ticket_id` 및 `category` 쿼리 필터 지원.
+*   `PATCH /api/v1/qa/items/{item_id}` : 검수 상태 토글 (`UNTESTED` -> `PASS` -> `FAIL` 등).
+
+#### [기능 5] 프로젝트 전역 설정 관리 (Slack 알림 설정 등)
+*   **엔드포인트:** `PATCH /api/v1/settings/{key}`
+*   **설명:** 슬랙 인커밍 웹훅 URL 등 전역 시스템 설정을 DB 상에서 동적으로 변경합니다.
+*   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`). 일반 팀원이 접근 시 `403 Forbidden` 반환.
+*   **요청 바디:** `ProjectSettingUpdate`
+*   **응답:** `200 OK` / `ProjectSettingResponse`
+
+---
+
+## 3. 호환성 및 마이그레이션 고려사항 (Migration & Scalability)
+
+- **SQLite 외래키 활성화 및 CASCADE:** SQLite에서 상충 티켓 삭제나 마일스톤 초기화 시 무결성이 유지되도록 `ON DELETE CASCADE` 설정을 적용하고 데이터베이스 세션 초기화 시 `PRAGMA foreign_keys = ON;`을 강제 활성화합니다.
+- **설정 초기 데이터 적재:** 어플리케이션 초기 가동 시 `project_settings` 테이블에 `slack_webhook_url` 설정 레코드를 기본 삽입해 놓는 마이그레이션 단계를 추가합니다.
