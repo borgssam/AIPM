@@ -379,7 +379,7 @@ class ProjectSettingUpdate(BaseModel):
 *   **엔드포인트:** `POST /api/v1/epics/`
 *   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`)
 *   **요청 바디:** `EpicCreate`
-*   **설명:** 지정한 프로젝트에 새로운 에픽(일정)을 수동으로 추가합니다.
+*   **설명:** 지정한 프로젝트에 새로운 에픽(일정)을 수동으로 추가합니다. (프론트엔드 UI 등록 모달에서는 시작 및 마감 날짜의 기본값으로 오늘 날짜를 미리 세팅하여 제공합니다.)
 *   **엔드포인트:** `PUT /api/v1/epics/{epic_id}`
 *   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`)
 *   **요청 바디:** `EpicUpdate`
