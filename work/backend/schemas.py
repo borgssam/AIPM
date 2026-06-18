@@ -43,6 +43,8 @@ class QAItemResponse(BaseModel):
 class ProjectResponse(BaseModel):
     id: int
     name: str
+    prd_content: Optional[str] = None
+    spec_content: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -63,6 +65,13 @@ class EpicResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+class EpicCreate(BaseModel):
+    project_id: int
+    title: str = Field(..., min_length=1)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
 
 class TicketResponse(BaseModel):
     id: int

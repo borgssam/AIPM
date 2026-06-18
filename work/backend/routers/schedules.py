@@ -52,7 +52,11 @@ def generate_schedule(
             db.flush()
             
         # 신규 프로젝트 적재
-        project = models.Project(name=project_name)
+        project = models.Project(
+            name=project_name,
+            prd_content=req.prd_content,
+            spec_content=req.spec_content
+        )
         db.add(project)
         db.flush()
     except Exception as db_err:

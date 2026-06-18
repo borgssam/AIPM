@@ -31,6 +31,33 @@ def get_epics(
         query = query.filter(models.Epic.project_id == project_id)
     return query.all()
 
+@router.post("/", response_model=schemas.EpicResponse)
+def create_epic(
+    epic_create: schemas.EpicCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
+    """
+    새로운 에픽 일정을 수동으로 추가하는 API (PM 권한 필요)
+    """
+    if current_user.role != "PM":
+        raise HTTPException(
+            status_code=403,
+            detail="PM 역할의 사용자만 에픽 일정을 추가할 수 있습니다."
+        )
+        
+    db_epic = models.Epic(
+        project_id=epic_create.project_id,
+        title=epic_create.title,
+        description=epic_create.description,
+        start_date=epic_create.start_date,
+        due_date=epic_create.due_date
+    )
+    db.add(db_epic)
+    db.commit()
+    db.refresh(db_epic)
+    return db_epic
+
 @router.put("/{epic_id}", response_model=schemas.EpicResponse)
 def update_epic(
     epic_id: int,

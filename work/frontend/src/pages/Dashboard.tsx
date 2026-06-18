@@ -95,6 +95,13 @@ export const Dashboard: FC = () => {
   const [editEpicStartDate, setEditEpicStartDate] = useState('');
   const [editEpicDueDate, setEditEpicDueDate] = useState('');
 
+  // 에픽 일정 생성 관련 상태
+  const [isEpicCreateModalOpen, setIsEpicCreateModalOpen] = useState(false);
+  const [epicCreateTitle, setEpicCreateTitle] = useState('');
+  const [epicCreateDescription, setEpicCreateDescription] = useState('');
+  const [epicCreateStartDate, setEpicCreateStartDate] = useState('');
+  const [epicCreateDueDate, setEpicCreateDueDate] = useState('');
+
   // 칸반 내 담당 작업 필터링 상태
   const [myTasksOnly, setMyTasksOnly] = useState(false);
 
@@ -336,6 +343,51 @@ export const Dashboard: FC = () => {
     } catch (err: any) {
       console.error(err);
       setApiError('에픽 일정 수정에 실패했습니다.');
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenCreateEpicModal = () => {
+    setEpicCreateTitle('');
+    setEpicCreateDescription('');
+    setEpicCreateStartDate('');
+    setEpicCreateDueDate('');
+    setIsEpicCreateModalOpen(true);
+  };
+
+  const handleSaveEpic = async () => {
+    if (!epicCreateTitle.trim()) {
+      setApiError('에픽 제목을 입력해 주세요.');
+      setTimeout(() => setApiError(''), 3500);
+      return;
+    }
+    if (selectedProjectId === null) {
+      setApiError('선택된 프로젝트가 없습니다.');
+      setTimeout(() => setApiError(''), 3500);
+      return;
+    }
+    try {
+      setLoading(true);
+      await axiosInstance.post('/epics', {
+        project_id: selectedProjectId,
+        title: epicCreateTitle,
+        description: epicCreateDescription || null,
+        start_date: epicCreateStartDate || null,
+        due_date: epicCreateDueDate || null
+      });
+      setApiSuccess('에픽 일정이 성공적으로 추가되었습니다.');
+      setIsEpicCreateModalOpen(false);
+      fetchEpics();
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setApiError(err.response.data.detail);
+      } else {
+        setApiError('에픽 일정 추가에 실패했습니다.');
+      }
       setTimeout(() => setApiError(''), 3500);
     } finally {
       setLoading(false);
@@ -790,11 +842,22 @@ export const Dashboard: FC = () => {
         {/* ==================== [2. 일정관리 (Gantt Chart) 탭] ==================== */}
         {activeTab === 'schedule' && (
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                📊 프로젝트 타임라인 간트 차트 (Gantt Chart Timeline)
-              </h3>
-              <p className="text-slate-400 text-sm">각 개발 일정 티켓들의 시작일과 마감 마일스톤 범위를 시각적으로 가시화한 타임라인 그래프 뷰입니다.</p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                  📊 프로젝트 타임라인 간트 차트 (Gantt Chart Timeline)
+                </h3>
+                <p className="text-slate-400 text-sm">각 개발 일정 티켓들의 시작일과 마감 마일스톤 범위를 시각적으로 가시화한 타임라인 그래프 뷰입니다.</p>
+              </div>
+              {currentUser && currentUser.role === 'PM' && (
+                <Button 
+                  onClick={handleOpenCreateEpicModal}
+                  disabled={selectedProjectId === null}
+                  className="px-3 py-1.5 flex items-center gap-1 text-xs self-start md:self-auto"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" /> 에픽 추가
+                </Button>
+              )}
             </div>
 
             {apiError && (
@@ -813,9 +876,16 @@ export const Dashboard: FC = () => {
                 <Calendar className="w-12 h-12 text-slate-600 mb-4 animate-bounce" />
                 <h4 className="text-white font-bold mb-1">생성된 WBS 에픽 일정이 없습니다.</h4>
                 <p className="text-slate-500 text-sm mb-4 max-w-sm">프로젝트 생성 탭에서 기획 문서를 입력하고 AI 분석을 가동하여 간트 차트 에픽 타임라인을 확인하세요.</p>
-                <Button variant="primary" onClick={() => setActiveTab('project_create')} className="text-xs">
-                  WBS 일정 생성하러 가기
-                </Button>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  <Button variant="primary" onClick={() => setActiveTab('project_create')} className="text-xs">
+                    WBS 일정 생성하러 가기
+                  </Button>
+                  {currentUser && currentUser.role === 'PM' && (
+                    <Button variant="secondary" onClick={handleOpenCreateEpicModal} disabled={selectedProjectId === null} className="text-xs">
+                      수동 에픽 추가
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-x-auto p-6 shadow-lg">
@@ -1493,6 +1563,83 @@ export const Dashboard: FC = () => {
                 className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
               >
                 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 에픽 일정 추가 모달 */}
+      {isEpicCreateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">📅 새 에픽 일정 추가</h3>
+              <button 
+                onClick={() => setIsEpicCreateModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 transition font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">에픽 제목</label>
+                <input 
+                  type="text" 
+                  value={epicCreateTitle}
+                  onChange={(e) => setEpicCreateTitle(e.target.value)}
+                  placeholder="새 에픽의 제목을 입력하세요."
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">설명</label>
+                <textarea 
+                  value={epicCreateDescription}
+                  onChange={(e) => setEpicCreateDescription(e.target.value)}
+                  placeholder="에픽 상세 설명을 입력하세요."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">시작일</label>
+                  <input 
+                    type="date" 
+                    value={epicCreateStartDate}
+                    onChange={(e) => setEpicCreateStartDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">마감일</label>
+                  <input 
+                    type="date" 
+                    value={epicCreateDueDate}
+                    onChange={(e) => setEpicCreateDueDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsEpicCreateModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
+              >
+                취소
+              </button>
+              <button 
+                onClick={handleSaveEpic}
+                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
+              >
+                추가
               </button>
             </div>
           </div>

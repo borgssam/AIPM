@@ -1,22 +1,22 @@
-import sys
+import sqlite3
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "work", "backend"))
 
-from database import SessionLocal
-import models
-
-db = SessionLocal()
-try:
-    with open("db_output.txt", "w", encoding="utf-8") as f:
-        f.write("=== USERS ===\n")
-        users = db.query(models.User).all()
-        for u in users:
-            f.write(f"ID: {u.id}, Username: {u.username}, Name: {u.name}, Role: {u.role}\n")
-
-        f.write("\n=== TICKETS ===\n")
-        tickets = db.query(models.KanbanTicket).all()
-        for t in tickets:
-            f.write(f"ID: {t.id}, Title: {t.title}, Status: {t.status}, Start: {t.start_date}, Due: {t.due_date}\n")
-    print("Successfully wrote db_output.txt")
-finally:
-    db.close()
+db_path = "work/backend/ai_pm.db"
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name, prd_content, spec_content FROM projects")
+        rows = cursor.fetchall()
+        print(f"Projects found: {len(rows)}")
+        for r in rows:
+            print(f"Name: {r[0]}")
+            print(f"PRD Content: {r[1][:50] if r[1] else None}...")
+            print(f"Spec Content: {r[2][:50] if r[2] else None}...")
+            print("-" * 20)
+    except Exception as e:
+        print(f"Error querying DB: {e}")
+    finally:
+        conn.close()
+else:
+    print("DB file not found")

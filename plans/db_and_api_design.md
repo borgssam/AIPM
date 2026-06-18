@@ -21,7 +21,17 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 생성 일시 |
 | **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 계정 정보 수정 일시 |
 
-#### 2) `epics` 테이블 (에픽/일정 관리)
+#### 2) `projects` 테이블 (프로젝트 관리)
+| 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 프로젝트 식별 고유 ID |
+| **name** | `VARCHAR(100)` | `String(100)` | UNIQUE, NOT NULL | 프로젝트 이름 |
+| **prd_content** | `TEXT` | `Text` | NULLABLE | 요구명세서 (PRD) 내용 |
+| **spec_content** | `TEXT` | `Text` | NULLABLE | 기능명세서 (Spec) 내용 |
+| **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
+| **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 변경 일시 |
+
+#### 3) `epics` 테이블 (에픽/일정 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 에픽 식별 고유 ID |
@@ -32,7 +42,7 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **due_date** | `DATE` | `Date` | NULLABLE | 작업 마감 예정일 |
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
 
-#### 3) `kanban_tickets` 테이블 (칸반 관리)
+#### 4) `kanban_tickets` 테이블 (칸반 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 티켓 식별 고유 ID |
@@ -45,7 +55,7 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
 | **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 수정 일시 |
 
-#### 4) `qa_inspection_items` 테이블 (검수 명세 관리)
+#### 5) `qa_inspection_items` 테이블 (검수 명세 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 검수 항목 고유 ID |
@@ -55,7 +65,7 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **status** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'UNTESTED' | 검수 상태 (`UNTESTED`, `PASS`/`TESTED`, `FAIL`, `APPROVED`) |
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
 | **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 업데이트 일시 |
-#### 5) `project_settings` 테이블 (시스템 전역 설정 관리)
+#### 6) `project_settings` 테이블 (시스템 전역 설정 관리)
 | 컬럼명 | 데이터 타입 (SQL) | SQLAlchemy 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 설정 인덱스 ID |
@@ -115,6 +125,21 @@ class User(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tickets = relationship("KanbanTicket", back_populates="assignee")
+
+# --- Project ORM 모델 ---
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), unique=True, nullable=False)
+    prd_content = Column(Text, nullable=True)
+    spec_content = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tickets = relationship("KanbanTicket", back_populates="project", cascade="all, delete-orphan")
+    epics = relationship("Epic", back_populates="project", cascade="all, delete-orphan")
 
 # --- Epic ORM 모델 ---
 class Epic(Base):
@@ -225,7 +250,38 @@ class QAItemResponse(BaseModel):
 class QAItemUpdate(BaseModel):
     status: str = Field(..., example="PASS")
 
-# --- 3. Kanban 티켓 스키마 ---
+# --- 3. Kanban 티켓 및 프로젝트 관련 스키마 ---
+class ProjectResponse(BaseModel):
+    id: int
+    name: str
+    prd_content: Optional[str] = None
+    spec_content: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class EpicResponse(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class EpicCreate(BaseModel):
+    project_id: int
+    title: str = Field(..., min_length=1)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    due_date: Optional[date] = None
+
 class TicketResponse(BaseModel):
     id: int
     title: str
@@ -245,13 +301,14 @@ class TicketResponse(BaseModel):
         orm_mode = True
 
 class ScheduleGenerateRequest(BaseModel):
+    project_name: str = Field(..., example="신규 프로젝트")
     prd_content: str = Field(..., example="# 요구명세서\n...")
     spec_content: str = Field(..., example="# 기능명세서\n...")
 
 class ScheduleGenerateResponse(BaseModel):
-    created_tickets_count: int
-    warning_tickets_count: int
-    tickets: List[TicketResponse]
+    created_epics_count: int
+    warning_epics_count: int
+    epics: List[EpicResponse] = []
 
 class TicketUpdate(BaseModel):
     assignee_id: Optional[int] = Field(None, example=2)
@@ -317,6 +374,16 @@ class ProjectSettingUpdate(BaseModel):
 #### [기타] 칸반보드 및 일정관리용 전체/개별 티켓 조회
 *   `GET /api/v1/tickets` : 카드 검색 키워드 및 우선순위 필터링 쿼리 파라미터(`search`, `priority`, `assignee_id`) 지원.
 *   `GET /api/v1/tickets/{ticket_id}` : 개별 티켓 상세 정보 및 소속 `qa_items` 리스트 반환.
+
+#### [신규] 에픽 일정 추가 및 수정
+*   **엔드포인트:** `POST /api/v1/epics/`
+*   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`)
+*   **요청 바디:** `EpicCreate`
+*   **설명:** 지정한 프로젝트에 새로운 에픽(일정)을 수동으로 추가합니다.
+*   **엔드포인트:** `PUT /api/v1/epics/{epic_id}`
+*   **보안:** JWT 인증 필요 (PM 권한 전용: `role == 'PM'`)
+*   **요청 바디:** `EpicUpdate`
+*   **설명:** 기존 에픽 일정을 변경(수정)합니다.
 
 #### [기능 4] 기능/품질 검수 명세 체크리스트 전체 조회 및 토글
 *   `GET /api/v1/qa/items` : 검수 항목 리스트 조회. `ticket_id` 및 `category` 쿼리 필터 지원.
