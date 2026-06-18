@@ -69,5 +69,10 @@ def update_ticket(
         setattr(ticket, key, value)
     
     db.commit()
-    db.refresh(ticket)
+    
+    # 관계형 데이터(assignee, qa_items)를 명시적으로 로드하여 반환
+    ticket = db.query(models.KanbanTicket).options(
+        joinedload(models.KanbanTicket.qa_items),
+        joinedload(models.KanbanTicket.assignee)
+    ).filter(models.KanbanTicket.id == ticket_id).first()
     return ticket

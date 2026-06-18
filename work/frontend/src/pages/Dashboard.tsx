@@ -45,6 +45,9 @@ interface TicketResponse {
 }
 
 export const Dashboard: FC = () => {
+  const userStr = localStorage.getItem('user');
+  const currentUser = userStr ? JSON.parse(userStr) : null;
+
   const [activeTab, setActiveTab] = useState<TabType>('project_create');
   const [projectName, setProjectName] = useState('');
   const [prdContent, setPrdContent] = useState('');
@@ -66,6 +69,54 @@ export const Dashboard: FC = () => {
   const [editingTicket, setEditingTicket] = useState<TicketResponse | null>(null);
   const [editStartDate, setEditStartDate] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
+
+  // 전체 팀원 목록 상태
+  const [teamMembers, setTeamMembers] = useState<UserResponse[]>([]);
+
+  const fetchTeamMembers = async () => {
+    try {
+      const response = await axiosInstance.get('/users');
+      setTeamMembers(response.data);
+    } catch (err: any) {
+      console.error('Failed to load team members:', err);
+    }
+  };
+
+  const handleUpdateAssignee = async (ticketId: number, assigneeId: number | null) => {
+    try {
+      setLoading(true);
+      await axiosInstance.put(`/tickets/${ticketId}`, {
+        assignee_id: assigneeId
+      });
+      fetchTickets();
+      setApiSuccess('담당자가 성공적으로 업데이트되었습니다.');
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      setApiError('담당자 업데이트에 실패했습니다.');
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateStatus = async (ticketId: number, newStatus: string) => {
+    try {
+      setLoading(true);
+      await axiosInstance.put(`/tickets/${ticketId}`, {
+        status: newStatus
+      });
+      fetchTickets();
+      setApiSuccess('태스크 상태가 업데이트되었습니다.');
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      setApiError('상태 업데이트에 실패했습니다.');
+      setTimeout(() => setApiError(''), 3500);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleOpenEditModal = (ticket: TicketResponse) => {
     setEditingTicket(ticket);
@@ -135,6 +186,9 @@ export const Dashboard: FC = () => {
   // 탭 전환 시 및 선택된 프로젝트 변경 시 티켓 정보 갱신
   useEffect(() => {
     fetchTickets();
+    if (activeTab === 'kanban') {
+      fetchTeamMembers();
+    }
   }, [activeTab, selectedProjectId]);
 
   // AI 일정 분석 및 일괄 생성 API 호출 연동 핸들러
@@ -627,7 +681,7 @@ export const Dashboard: FC = () => {
                 </div>
                 <div className="space-y-3">
                   {filteredTickets.filter(t => t.status === 'TO_DO').map(ticket => (
-                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow cursor-pointer hover:border-slate-500 transition duration-150">
+                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
@@ -635,6 +689,56 @@ export const Dashboard: FC = () => {
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      
+                      {/* 담당자 지정 UI */}
+                      <div className="mt-3 pt-2 border-t border-slate-700/50">
+                        <label className="block text-[10px] text-slate-450 font-bold mb-1">👤 담당자 지정</label>
+                        {currentUser && currentUser.role === 'PM' ? (
+                          <select
+                            value={ticket.assignee_id || ''}
+                            onChange={(e) => handleUpdateAssignee(ticket.id, e.target.value ? Number(e.target.value) : null)}
+                            className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                          >
+                            <option value="">담당자 지정 안 함</option>
+                            {teamMembers.map(member => (
+                              <option key={member.id} value={member.id}>
+                                {member.name} ({member.role})
+                              </option>
+                            ))}
+                          </select>
+                        ) : currentUser ? (
+                          <select
+                            value={ticket.assignee_id || ''}
+                            onChange={(e) => handleUpdateAssignee(ticket.id, e.target.value ? Number(e.target.value) : null)}
+                            className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                          >
+                            <option value="">담당자 지정 안 함</option>
+                            <option value={currentUser.id}>{currentUser.name} (나)</option>
+                            {ticket.assignee_id && ticket.assignee_id !== currentUser.id && (
+                              <option value={ticket.assignee_id} disabled>
+                                {ticket.assignee?.name || '기타 담당자'}
+                              </option>
+                            )}
+                          </select>
+                        ) : (
+                          <div className="text-xs text-slate-500">로그인 필요</div>
+                        )}
+                      </div>
+
+                      {/* 상태 변경 UI */}
+                      <div className="mt-2.5 pt-1.5 flex items-center justify-between gap-2 border-t border-slate-800/40">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase">상태 변경</span>
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleUpdateStatus(ticket.id, e.target.value)}
+                          className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                        >
+                          <option value="TO_DO">To Do (대기)</option>
+                          <option value="IN_PROGRESS">In Progress (진행 중)</option>
+                          <option value="TO_REVIEW">To Review (검토 필요)</option>
+                          <option value="DONE">Done (완료)</option>
+                        </select>
+                      </div>
                     </div>
                   ))}
                   {filteredTickets.filter(t => t.status === 'TO_DO').length === 0 && (
@@ -657,7 +761,7 @@ export const Dashboard: FC = () => {
                     return (
                       <div 
                         key={ticket.id} 
-                        className={`bg-[#1e293b] p-4 rounded-lg shadow cursor-pointer transition duration-150 relative overflow-hidden ${
+                        className={`bg-[#1e293b] p-4 rounded-lg shadow transition duration-150 relative overflow-hidden text-left ${
                           isAiDetected ? 'border-2 border-amber-500/50 hover:border-amber-400' : 'border border-slate-700 hover:border-slate-500'
                         }`}
                       >
@@ -671,6 +775,29 @@ export const Dashboard: FC = () => {
                         </div>
                         <h4 className="font-semibold text-white text-sm pr-4">{ticket.title}</h4>
                         {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                        
+                        {/* 담당자 노출 */}
+                        {ticket.assignee && (
+                          <div className="mt-2 text-xs text-slate-400 flex items-center gap-1">
+                            <span>👤 담당자:</span>
+                            <span className="font-medium text-slate-300">{ticket.assignee.name}</span>
+                          </div>
+                        )}
+
+                        {/* 상태 변경 UI */}
+                        <div className="mt-3 pt-2 border-t border-slate-700/50 flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase">상태 변경</span>
+                          <select
+                            value={ticket.status}
+                            onChange={(e) => handleUpdateStatus(ticket.id, e.target.value)}
+                            className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                          >
+                            <option value="TO_DO">To Do (대기)</option>
+                            <option value="IN_PROGRESS">In Progress (진행 중)</option>
+                            <option value="TO_REVIEW">To Review (검토 필요)</option>
+                            <option value="DONE">Done (완료)</option>
+                          </select>
+                        </div>
                       </div>
                     );
                   })}
@@ -690,7 +817,7 @@ export const Dashboard: FC = () => {
                 </div>
                 <div className="space-y-3">
                   {filteredTickets.filter(t => t.status === 'IN_PROGRESS').map(ticket => (
-                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow cursor-pointer hover:border-slate-500 transition duration-150">
+                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
@@ -698,6 +825,27 @@ export const Dashboard: FC = () => {
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      
+                      {/* 담당자 노출 */}
+                      <div className="mt-2.5 flex items-center gap-1.5 text-xs text-brand-300 bg-brand-950/20 border border-brand-900/30 px-2 py-1 rounded">
+                        <span>👤 담당자:</span>
+                        <span className="font-semibold text-slate-200">{ticket.assignee?.name || '미지정'}</span>
+                      </div>
+
+                      {/* 상태 변경 UI */}
+                      <div className="mt-3 pt-2 border-t border-slate-700/50 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase">상태 변경</span>
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleUpdateStatus(ticket.id, e.target.value)}
+                          className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                        >
+                          <option value="TO_DO">To Do (대기)</option>
+                          <option value="IN_PROGRESS">In Progress (진행 중)</option>
+                          <option value="TO_REVIEW">To Review (검토 필요)</option>
+                          <option value="DONE">Done (완료)</option>
+                        </select>
+                      </div>
                     </div>
                   ))}
                   {filteredTickets.filter(t => t.status === 'IN_PROGRESS').length === 0 && (
@@ -716,7 +864,7 @@ export const Dashboard: FC = () => {
                 </div>
                 <div className="space-y-3">
                   {filteredTickets.filter(t => t.status === 'DONE').map(ticket => (
-                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow cursor-pointer hover:border-slate-500 transition duration-150">
+                    <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded text-white ${
                           ticket.priority === 'P0' ? 'bg-red-600' : ticket.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
@@ -724,6 +872,29 @@ export const Dashboard: FC = () => {
                       </div>
                       <h4 className="font-semibold text-white text-sm">{ticket.title}</h4>
                       {ticket.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ticket.description}</p>}
+                      
+                      {/* 담당자 노출 */}
+                      {ticket.assignee && (
+                        <div className="mt-2 text-xs text-slate-400 flex items-center gap-1">
+                          <span>👤 담당자:</span>
+                          <span className="font-medium text-slate-300">{ticket.assignee.name}</span>
+                        </div>
+                      )}
+
+                      {/* 상태 변경 UI */}
+                      <div className="mt-3 pt-2 border-t border-slate-700/50 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase">상태 변경</span>
+                        <select
+                          value={ticket.status}
+                          onChange={(e) => handleUpdateStatus(ticket.id, e.target.value)}
+                          className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-300 focus:outline-none focus:border-brand-500 cursor-pointer"
+                        >
+                          <option value="TO_DO">To Do (대기)</option>
+                          <option value="IN_PROGRESS">In Progress (진행 중)</option>
+                          <option value="TO_REVIEW">To Review (검토 필요)</option>
+                          <option value="DONE">Done (완료)</option>
+                        </select>
+                      </div>
                     </div>
                   ))}
                   {filteredTickets.filter(t => t.status === 'DONE').length === 0 && (

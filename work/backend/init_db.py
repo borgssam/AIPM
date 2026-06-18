@@ -25,11 +25,11 @@ def init_db():
         # 2. 초기 사용자 데이터 적재 (PM 및 개발자 계정)
         print("Seeding initial user accounts...")
         seed_users = [
-            {"username": "ksms", "password": "password123", "name": "kimsangmog", "role": "PM"},
-            {"username": "ksks", "password": "password123", "name": "ksmog", "role": "PM"},
-            {"username": "testpm", "password": "password123", "name": "Test PM", "role": "PM"},
-            {"username": "testuser", "password": "password123", "name": "Test User", "role": "DEVELOPER"},
-            {"username": "user123", "password": "password123", "name": "User 123", "role": "DEVELOPER"}
+            {"username": "pmpm", "password": "12345678", "name": "나피엠", "role": "PM"},
+            {"username": "dev1", "password": "12345678", "name": "개발자1", "role": "DEVELOPER"},
+            {"username": "dev2", "password": "12345678", "name": "개발자2", "role": "DEVELOPER"},
+            {"username": "dev3", "password": "12345678", "name": "개발자3", "role": "DEVELOPER"},
+            {"username": "dev4", "password": "12345678", "name": "개발자4", "role": "DEVELOPER"}
         ]
 
         for u_data in seed_users:
