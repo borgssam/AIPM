@@ -7,6 +7,7 @@ from database import get_db
 import models
 import schemas
 import auth_utils
+import llm_service
 
 router = APIRouter()
 
@@ -235,3 +236,111 @@ def update_ticket(
         joinedload(models.KanbanTicket.epics)
     ).filter(models.KanbanTicket.id == ticket_id).first()
     return ticket
+
+@router.post("/recommend", response_model=schemas.TicketRecommendResponse)
+def recommend_tickets(
+    req: schemas.TicketRecommendRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
+    """
+    해당 에픽과 프로젝트의 요구명세서(PRD), 기능명세서(Spec)를 참고하여
+    세부 할일(칸반 티켓) 및 QA 검수 요건을 추천받습니다.
+    exclude_existing 이 True인 경우 에픽의 기존 티켓을 LLM에 제공하여 제외하도록 합니다.
+    """
+    project = db.query(models.Project).filter(models.Project.id == req.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+        
+    epic = db.query(models.Epic).filter(models.Epic.id == req.epic_id).first()
+    if not epic:
+        raise HTTPException(status_code=404, detail="에픽을 찾을 수 없습니다.")
+
+    existing_ticket_titles = []
+    if req.exclude_existing:
+        # 에픽에 연결된 기존 티켓들의 제목 수집
+        existing_ticket_titles = [t.title for t in epic.tickets]
+
+    try:
+        recommendations = llm_service.recommend_epic_tickets(
+            prd_content=project.prd_content or "",
+            spec_content=project.spec_content or "",
+            epic_title=epic.title,
+            epic_description=epic.description or "",
+            existing_tickets=existing_ticket_titles
+        )
+        return recommendations
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI 할 일 추천 생성에 실패했습니다: {str(e)}"
+        )
+
+
+@router.post("/bulk-create", response_model=schemas.TicketBulkCreateResponse)
+def bulk_create_tickets(
+    req: schemas.TicketBulkCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user)
+):
+    """
+    추천받은 할일 목록을 실제로 칸반 할일 목록에 저장하고 에픽과 매핑합니다.
+    동시에 필요에 따라 QA 검수 항목을 벌크 생성합니다.
+    """
+    project = db.query(models.Project).filter(models.Project.id == req.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다.")
+
+    epic = db.query(models.Epic).filter(models.Epic.id == req.epic_id).first()
+    if not epic:
+        raise HTTPException(status_code=404, detail="에픽을 찾을 수 없습니다.")
+
+    created_count = 0
+    try:
+        for t_data in req.tickets:
+            # KanbanTicket 객체 생성
+            db_ticket = models.KanbanTicket(
+                title=t_data.title,
+                description=t_data.description,
+                status=models.TicketStatus.TO_DO.value,
+                priority=t_data.priority,
+                project_id=req.project_id
+            )
+            # 에픽 M:N 연결
+            db_ticket.epics.append(epic)
+            db.add(db_ticket)
+            db.flush() # ticket_id 획득
+
+            # 기능검수 QA 생성
+            if t_data.need_functional_qa:
+                func_title = t_data.functional_qa_title or "기능 검수"
+                func_item = models.QAInspectionItem(
+                    ticket_id=db_ticket.id,
+                    category="FUNCTIONAL",
+                    title=func_title,
+                    status=models.QAItemStatus.UNTESTED.value
+                )
+                db.add(func_item)
+
+            # 품질검수 QA 생성
+            if t_data.need_quality_qa:
+                qual_title = t_data.quality_qa_title or "품질 검수"
+                qual_item = models.QAInspectionItem(
+                    ticket_id=db_ticket.id,
+                    category="QUALITY",
+                    title=qual_title,
+                    status=models.QAItemStatus.UNTESTED.value
+                )
+                db.add(qual_item)
+
+            created_count += 1
+        
+        db.commit()
+        return schemas.TicketBulkCreateResponse(created_count=created_count)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"티켓 벌크 생성 중 오류가 발생했습니다: {str(e)}"
+        )
+

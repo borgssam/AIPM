@@ -143,3 +143,133 @@ def analyze_specifications(
             return json.loads(content.strip())
         except Exception as inner_e:
             raise ValueError(f"Failed to parse LLM response as JSON: {inner_e}. Raw content: {response.content}")
+
+def recommend_epic_tickets(
+    prd_content: str,
+    spec_content: str,
+    epic_title: str,
+    epic_description: str = "",
+    existing_tickets: list = None
+) -> dict:
+    """
+    에픽 정보, 요구명세서(PRD) 및 기능명세서(Spec)를 바탕으로 세부 칸반 티켓 및 QA 검수 항목을 추천합니다.
+    기존 티켓 정보(existing_tickets)가 주어지면 중복되지 않는 새로운 세부 할일을 도출합니다.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    
+    # 사용할 LLM 모델 설정
+    if openai_key:
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=openai_key,
+            temperature=0.2,
+            model_kwargs={"response_format": {"type": "json_object"}}
+        )
+    elif gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=gemini_key,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+        except ImportError:
+            llm = ChatOpenAI(
+                model="gemini-1.5-flash",
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                temperature=0.2,
+                model_kwargs={"response_format": {"type": "json_object"}}
+            )
+    else:
+        raise ValueError("Neither OPENAI_API_KEY nor GEMINI_API_KEY is configured in the environment.")
+
+    today_str = datetime.today().strftime('%Y-%m-%d')
+    existing_tickets_str = ", ".join(existing_tickets) if existing_tickets else "없음"
+
+    system_prompt = f"""
+당신은 전문 AI 프로젝트 매니저(AI PM)입니다.
+역할은 제공된 프로젝트 요구명세서(PRD), 기능명세서(Spec) 및 선택된 에픽(Epic)의 정보를 바탕으로, 해당 에픽을 완수하기 위해 필요한 구체적이고 실행 가능한 세부 개발 할일(칸반 티켓)들을 추천하는 것입니다.
+
+오늘 날짜: {today_str}
+
+## 중요 지침:
+1. **언어 제약 조건 (가장 중요 - 절대 규칙)**:
+   - **출력되는 JSON의 모든 텍스트 필드(`title`, `description`, `functional_qa_title`, `quality_qa_title`)는 무조건 완전하고 자연스러운 한국어(한글)로 작성해야 합니다.** 영어로 답변이 나갈 경우 시스템 에러로 간주됩니다.
+2. **할 일 도출**:
+   - 선택된 에픽("{epic_title}" - 설명: {epic_description}) 범주 내에서 수행해야 할 실무 세부 작업들을 칸반 티켓 형태로 3~5개 도출합니다.
+   - 각 추천 티켓은 다음 필드를 포함해야 합니다:
+     - `title`: 할 일의 직관적이고 명확한 한글 제목
+     - `description`: 무엇을 어떻게 작업해야 하는지 한글로 상세 설명
+     - `priority`: 우선순위 (`P0`[긴급/블로커], `P1`[보통], `P2`[낮음] 중 하나)
+     - `need_functional_qa`: 해당 할 일에 대해 기능 테스트(검수)가 필요한지 여부 (true/false)
+     - `functional_qa_title`: 기능 검수 요건 (need_functional_qa가 true인 경우, 검증해야 할 비즈니스 규칙 및 동작을 한국어로 기술)
+     - `need_quality_qa`: 해당 할 일에 대해 품질 테스트(성능, 보안, UI 완성도 등)가 필요한지 여부 (true/false)
+     - `quality_qa_title`: 품질 검수 요건 (need_quality_qa가 true인 경우, 검증해야 할 성능/보안/규격 품질 요소를 한국어로 기술)
+3. **중복 제외 규칙**:
+   - 기존에 이미 등록된 할 일 목록(기존 할 일: {existing_tickets_str})이 제공된 경우, 이들과 유사하거나 동일한 작업은 추천에서 제외하여 완전히 새로운 세부 작업을 도출해야 합니다.
+
+## 출력 JSON 구조 (반드시 이 형식을 준수하고, 텍스트는 100% 한국어로 채우십시오):
+{{
+  "recommendations": [
+    {{
+      "title": "로그인 페이지 컴포넌트 구현",
+      "description": "회원 인증 에픽을 위해 로그인 화면 폼 UI 구현 및 디자인 가이드 반영",
+      "priority": "P1",
+      "need_functional_qa": true,
+      "functional_qa_title": "아이디/비밀번호 미입력 시 에러 메시지가 표시되는지 확인",
+      "need_quality_qa": false,
+      "quality_qa_title": ""
+    }}
+  ]
+}}
+"""
+
+    human_prompt = f"""
+### 입력 PRD (제품 요구사항 정의서):
+{prd_content}
+
+### 입력 기능 명세서 (Functional Specification):
+{spec_content}
+
+### 대상 에픽 정보:
+- 제목: {epic_title}
+- 설명: {epic_description}
+
+### 기존 등록된 할 일 목록 (중복 및 유사 항목 추천 제외 대상):
+{existing_tickets_str}
+"""
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt)
+    ]
+
+    # 디버깅 로그 출력
+    print("\n" + "=" * 50 + " [LLM RECOMMENDATION REQUEST PROMPT] " + "=" * 50)
+    print(f"[SYSTEM PROMPT]\n{system_prompt}")
+    print(f"[HUMAN PROMPT]\n{human_prompt}")
+    print("=" * 122 + "\n")
+
+    response = llm.invoke(messages)
+
+    print("\n" + "=" * 50 + " [LLM RECOMMENDATION RESPONSE RAW CONTENT] " + "=" * 50)
+    print(response.content)
+    print("=" * 128 + "\n")
+
+    try:
+        result_dict = json.loads(response.content)
+        return result_dict
+    except Exception as e:
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        try:
+            return json.loads(content.strip())
+        except Exception as inner_e:
+            raise ValueError(f"Failed to parse LLM response as JSON: {inner_e}. Raw content: {response.content}")
+

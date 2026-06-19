@@ -131,3 +131,39 @@ class ScheduleGenerateResponse(BaseModel):
     created_epics_count: int
     warning_epics_count: int
     epics: List[EpicResponse]
+
+# --- 4. AI Flink 할 일 추천 관련 스키마 ---
+class TicketRecommendRequest(BaseModel):
+    project_id: int
+    epic_id: int
+    exclude_existing: bool = False
+
+class TicketRecommendItem(BaseModel):
+    title: str
+    description: Optional[str] = None
+    priority: str = "P1"
+    need_functional_qa: bool = False
+    functional_qa_title: Optional[str] = None
+    need_quality_qa: bool = False
+    quality_qa_title: Optional[str] = None
+
+class TicketRecommendResponse(BaseModel):
+    recommendations: List[TicketRecommendItem]
+
+class TicketBulkCreateItem(BaseModel):
+    title: str
+    description: Optional[str] = None
+    priority: str = "P1"
+    need_functional_qa: bool = False
+    functional_qa_title: Optional[str] = None
+    need_quality_qa: bool = False
+    quality_qa_title: Optional[str] = None
+
+class TicketBulkCreateRequest(BaseModel):
+    project_id: int
+    epic_id: int
+    tickets: List[TicketBulkCreateItem]
+
+class TicketBulkCreateResponse(BaseModel):
+    created_count: int
+

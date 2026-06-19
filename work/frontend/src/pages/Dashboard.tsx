@@ -116,21 +116,107 @@ export const Dashboard: FC = () => {
   const [isAiFlinkModalOpen, setIsAiFlinkModalOpen] = useState(false);
   const [selectedEpicIdForFlink, setSelectedEpicIdForFlink] = useState<number | ''>('');
   const [excludeExistingTasks, setExcludeExistingTasks] = useState(false);
+  const [flinkLoading, setFlinkLoading] = useState(false);
+  const [flinkError, setFlinkError] = useState('');
   const [flinkRecommendations, setFlinkRecommendations] = useState<Array<{
     id: number;
     title: string;
     description: string;
     priority: 'P0' | 'P1' | 'P2';
+    need_functional_qa: boolean;
+    functional_qa_title: string;
+    need_quality_qa: boolean;
+    quality_qa_title: string;
     selected: boolean;
   }>>([]);
 
-  const handleGetFlinkRecommendations = () => {
-    // UI 뼈대 시연용 Mock 데이터 설정
-    setFlinkRecommendations([
-      { id: 1, title: '로그인 페이지 컴포넌트 마크업', description: '기본 테마가 적용된 로그인 폼 UI 구현', priority: 'P1', selected: true },
-      { id: 2, title: '사용자 JWT 토큰 만료 핸들러 작성', description: 'API 호출 에러 발생 시 토큰 만료 판별 및 세션 클리어', priority: 'P0', selected: false },
-      { id: 3, title: '회원가입 비밀번호 정규식 유효성 검증', description: '8자 이상 영문 대소문자 특수문자 조합 정규식 적용', priority: 'P2', selected: true }
-    ]);
+  const handleGetFlinkRecommendations = async () => {
+    if (!selectedEpicIdForFlink) {
+      setFlinkError('에픽을 먼저 선택하세요.');
+      return;
+    }
+    if (selectedProjectId === null) {
+      setFlinkError('선택된 프로젝트가 없습니다.');
+      return;
+    }
+
+    setFlinkLoading(true);
+    setFlinkError('');
+    setFlinkRecommendations([]);
+
+    try {
+      const response = await axiosInstance.post('/tickets/recommend', {
+        project_id: selectedProjectId,
+        epic_id: selectedEpicIdForFlink,
+        exclude_existing: excludeExistingTasks
+      });
+      
+      const recommendations = response.data.recommendations || [];
+      setFlinkRecommendations(recommendations.map((item: any, idx: number) => ({
+        id: idx + 1,
+        title: item.title || '',
+        description: item.description || '',
+        priority: item.priority || 'P1',
+        need_functional_qa: !!item.need_functional_qa,
+        functional_qa_title: item.functional_qa_title || '',
+        need_quality_qa: !!item.need_quality_qa,
+        quality_qa_title: item.quality_qa_title || '',
+        selected: true
+      })));
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setFlinkError(err.response.data.detail);
+      } else {
+        setFlinkError('AI 추천 결과를 받아오는 중 오류가 발생했습니다.');
+      }
+    } finally {
+      setFlinkLoading(false);
+    }
+  };
+
+  const handleApplyFlinkRecommendations = async () => {
+    const selectedItems = flinkRecommendations.filter(item => item.selected);
+    if (selectedItems.length === 0) {
+      setFlinkError('적용할 할 일이 선택되지 않았습니다.');
+      return;
+    }
+    if (selectedProjectId === null || !selectedEpicIdForFlink) {
+      setFlinkError('프로젝트 또는 에픽이 선택되지 않았습니다.');
+      return;
+    }
+
+    setFlinkLoading(true);
+    setFlinkError('');
+    try {
+      await axiosInstance.post('/tickets/bulk-create', {
+        project_id: selectedProjectId,
+        epic_id: selectedEpicIdForFlink,
+        tickets: selectedItems.map(item => ({
+          title: item.title,
+          description: item.description,
+          priority: item.priority,
+          need_functional_qa: item.need_functional_qa,
+          functional_qa_title: item.functional_qa_title,
+          need_quality_qa: item.need_quality_qa,
+          quality_qa_title: item.quality_qa_title
+        }))
+      });
+      
+      setIsAiFlinkModalOpen(false);
+      fetchTickets();
+      setApiSuccess('AI 추천 할 일이 성공적으로 추가되었습니다.');
+      setTimeout(() => setApiSuccess(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setFlinkError(err.response.data.detail);
+      } else {
+        setFlinkError('할 일 저장에 실패했습니다.');
+      }
+    } finally {
+      setFlinkLoading(false);
+    }
   };
 
   const handleToggleRecommendSelect = (id: number) => {
@@ -1896,6 +1982,7 @@ export const Dashboard: FC = () => {
               <button 
                 onClick={() => setIsAiFlinkModalOpen(false)}
                 className="text-slate-400 hover:text-white transition text-lg font-bold"
+                disabled={flinkLoading}
               >
                 &times;
               </button>
@@ -1903,6 +1990,12 @@ export const Dashboard: FC = () => {
 
             {/* Body */}
             <div className="p-6 space-y-4">
+              {flinkError && (
+                <div className="bg-red-900/30 border border-red-500/50 text-red-200 text-xs p-3 rounded-lg">
+                  ⚠️ {flinkError}
+                </div>
+              )}
+
               {/* 에픽선택 콤보박스 */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -1911,7 +2004,8 @@ export const Dashboard: FC = () => {
                 <select 
                   value={selectedEpicIdForFlink}
                   onChange={(e) => setSelectedEpicIdForFlink(e.target.value ? Number(e.target.value) : '')}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                  disabled={flinkLoading}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer disabled:opacity-50"
                 >
                   <option value="">-- 에픽을 선택하세요 --</option>
                   {epics.map((epic) => (
@@ -1929,7 +2023,8 @@ export const Dashboard: FC = () => {
                     type="checkbox" 
                     checked={excludeExistingTasks}
                     onChange={(e) => setExcludeExistingTasks(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer" 
+                    disabled={flinkLoading}
+                    className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer disabled:opacity-50" 
                   />
                   기존할일제외
                 </label>
@@ -1939,9 +2034,17 @@ export const Dashboard: FC = () => {
               <div className="flex justify-start">
                 <Button 
                   onClick={handleGetFlinkRecommendations}
-                  className="px-4 py-2 flex items-center gap-1.5 text-xs bg-gradient-to-r from-blue-500 to-brand-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-brand-650 shadow"
+                  disabled={flinkLoading}
+                  className="px-4 py-2 flex items-center gap-1.5 text-xs bg-gradient-to-r from-blue-500 to-brand-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-brand-650 shadow disabled:opacity-50"
                 >
-                  추천받기
+                  {flinkLoading ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      추천 받는 중...
+                    </>
+                  ) : (
+                    '추천받기'
+                  )}
                 </Button>
               </div>
 
@@ -1956,7 +2059,7 @@ export const Dashboard: FC = () => {
                       <tr>
                         <th className="p-3 w-12 text-center">선택</th>
                         <th className="p-3 w-1/3">할 일 제목</th>
-                        <th className="p-3">상세 내용</th>
+                        <th className="p-3">상세 내용 (QA 포함)</th>
                         <th className="p-3 w-16 text-center">우선순위</th>
                       </tr>
                     </thead>
@@ -1964,7 +2067,7 @@ export const Dashboard: FC = () => {
                       {flinkRecommendations.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="p-8 text-center text-slate-500 italic">
-                            추천받기 버튼을 클릭하여 AI 추천 목록을 생성해 보세요.
+                            {flinkLoading ? 'AI 분석에 기반하여 맞춤형 할 일을 도출하고 있습니다...' : '추천받기 버튼을 클릭하여 AI 추천 목록을 생성해 보세요.'}
                           </td>
                         </tr>
                       ) : (
@@ -1979,7 +2082,23 @@ export const Dashboard: FC = () => {
                               />
                             </td>
                             <td className="p-3 font-semibold text-white">{item.title}</td>
-                            <td className="p-3 text-slate-450">{item.description}</td>
+                            <td className="p-3 text-slate-450 space-y-1">
+                              <div>{item.description}</div>
+                              {(item.need_functional_qa || item.need_quality_qa) && (
+                                <div className="text-[10px] text-slate-500 flex flex-wrap gap-1.5 mt-1">
+                                  {item.need_functional_qa && (
+                                    <span className="bg-green-950/30 border border-green-900/30 text-green-400 px-1.5 py-0.5 rounded" title={item.functional_qa_title}>
+                                      ⚙️ 기능검수: {item.functional_qa_title}
+                                    </span>
+                                  )}
+                                  {item.need_quality_qa && (
+                                    <span className="bg-blue-950/30 border border-blue-900/30 text-blue-400 px-1.5 py-0.5 rounded" title={item.quality_qa_title}>
+                                      🛡️ 품질검수: {item.quality_qa_title}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td className="p-3 text-center">
                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${
                                 item.priority === 'P0' ? 'bg-red-600' : item.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
@@ -2000,18 +2119,17 @@ export const Dashboard: FC = () => {
             <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
               <button 
                 onClick={() => setIsAiFlinkModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-350 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
+                disabled={flinkLoading}
+                className="px-4 py-2 bg-slate-800 text-slate-350 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
               >
                 닫기
               </button>
               <button 
-                onClick={() => {
-                  // 적용 기능은 현재 동작 단계 제외 (화면만 구현)
-                  setIsAiFlinkModalOpen(false);
-                }}
-                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
+                onClick={handleApplyFlinkRecommendations}
+                disabled={flinkLoading || flinkRecommendations.length === 0}
+                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20 disabled:opacity-50"
               >
-                적용
+                {flinkLoading ? '적용 중...' : '적용'}
               </button>
             </div>
           </div>
