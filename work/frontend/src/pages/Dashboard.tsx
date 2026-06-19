@@ -1020,6 +1020,14 @@ export const Dashboard: FC = () => {
                 >
                   <PlusCircle className="w-3.5 h-3.5" /> 새 할 일 추가
                 </Button>
+                {currentUser && currentUser.role === 'PM' && (
+                  <Button 
+                    onClick={() => setActiveTab('project_create')}
+                    className="px-3 py-1.5 flex items-center gap-1 text-xs bg-gradient-to-r from-purple-650 to-indigo-650 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md shadow-indigo-500/20"
+                  >
+                    🤖 인공지능 플링크
+                  </Button>
+                )}
               </div>
             </div>
 

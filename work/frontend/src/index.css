@@ -38,16 +38,16 @@ body {
 /* ==================== 테마별 색상 오버라이딩 (Dolphin, Sunflower, Geumjandi) ==================== */
 
 /* 1. 돌고래 테마 (기본 다크 네이비 / 오션 블루 매칭) */
-[data-theme='dolphin'] body { background-color: #050b14 !important; }
-[data-theme='dolphin'] .bg-\[\#0b0f19\] { background-color: #050b14 !important; }
-[data-theme='dolphin'] .bg-\[\#0f172a\] { background-color: #0b132b !important; }
-[data-theme='dolphin'] .bg-\[\#070a13\] { background-color: #001220 !important; }
-[data-theme='dolphin'] .bg-\[\#121b2e\] { background-color: #1c2541 !important; }
-[data-theme='dolphin'] .bg-\[\#1e293b\] { background-color: #22333b !important; }
-[data-theme='dolphin'] .bg-slate-900 { background-color: #050b14 !important; }
-[data-theme='dolphin'] .bg-slate-950\/80 { background-color: rgba(5, 11, 20, 0.8) !important; }
+[data-theme='dolphin'] body { background-color: #0a192f !important; }
+[data-theme='dolphin'] .bg-\[\#0b0f19\] { background-color: #0a192f !important; }
+[data-theme='dolphin'] .bg-\[\#0f172a\] { background-color: #172a45 !important; }
+[data-theme='dolphin'] .bg-\[\#070a13\] { background-color: #061224 !important; }
+[data-theme='dolphin'] .bg-\[\#121b2e\] { background-color: #1b3554 !important; }
+[data-theme='dolphin'] .bg-\[\#1e293b\] { background-color: #1e3b62 !important; }
+[data-theme='dolphin'] .bg-slate-900 { background-color: #0a192f !important; }
+[data-theme='dolphin'] .bg-slate-950\/80 { background-color: rgba(10, 25, 47, 0.8) !important; }
 [data-theme='dolphin'] .border-slate-800 { border-color: #1e3a8a !important; }
-[data-theme='dolphin'] .border-slate-700 { border-color: #3b82f6/40 !important; }
+[data-theme='dolphin'] .border-slate-700 { border-color: rgba(59, 130, 246, 0.4) !important; }
 [data-theme='dolphin'] .bg-brand-500 { background-color: #00b4d8 !important; }
 [data-theme='dolphin'] .bg-brand-600 { background-color: #0077b6 !important; }
 [data-theme='dolphin'] .bg-brand-650 { background-color: #03045e !important; }
@@ -60,16 +60,16 @@ body {
 [data-theme='dolphin'] .to-brand-600 { --tw-gradient-to: #03045e !important; }
 
 /* 2. 해바라기 테마 (웜 차콜 및 골드/옐로우/오렌지 매칭) */
-[data-theme='sunflower'] body { background-color: #100b06 !important; }
-[data-theme='sunflower'] .bg-\[\#0b0f19\] { background-color: #100b06 !important; }
-[data-theme='sunflower'] .bg-\[\#0f172a\] { background-color: #1d150e !important; }
-[data-theme='sunflower'] .bg-\[\#070a13\] { background-color: #130f0a !important; }
-[data-theme='sunflower'] .bg-\[\#121b2e\] { background-color: #251c13 !important; }
-[data-theme='sunflower'] .bg-\[\#1e293b\] { background-color: #38291a !important; }
-[data-theme='sunflower'] .bg-slate-900 { background-color: #100b06 !important; }
-[data-theme='sunflower'] .bg-slate-950\/80 { background-color: rgba(16, 11, 6, 0.8) !important; }
+[data-theme='sunflower'] body { background-color: #1c1917 !important; }
+[data-theme='sunflower'] .bg-\[\#0b0f19\] { background-color: #1c1917 !important; }
+[data-theme='sunflower'] .bg-\[\#0f172a\] { background-color: #292524 !important; }
+[data-theme='sunflower'] .bg-\[\#070a13\] { background-color: #141211 !important; }
+[data-theme='sunflower'] .bg-\[\#121b2e\] { background-color: #3f3936 !important; }
+[data-theme='sunflower'] .bg-\[\#1e293b\] { background-color: #44403c !important; }
+[data-theme='sunflower'] .bg-slate-900 { background-color: #1c1917 !important; }
+[data-theme='sunflower'] .bg-slate-950\/80 { background-color: rgba(28, 25, 23, 0.8) !important; }
 [data-theme='sunflower'] .border-slate-800 { border-color: #5c4028 !important; }
-[data-theme='sunflower'] .border-slate-700 { border-color: #7c5835/40 !important; }
+[data-theme='sunflower'] .border-slate-700 { border-color: rgba(124, 88, 53, 0.4) !important; }
 [data-theme='sunflower'] .bg-brand-500 { background-color: #f39c12 !important; }
 [data-theme='sunflower'] .bg-brand-600 { background-color: #e67e22 !important; }
 [data-theme='sunflower'] .bg-brand-650 { background-color: #d35400 !important; }
@@ -82,16 +82,16 @@ body {
 [data-theme='sunflower'] .to-brand-600 { --tw-gradient-to: #d35400 !important; }
 
 /* 3. 금잔디 테마 (다크 포레스트 및 딥 에메랄드/그린/연두 매칭) */
-[data-theme='marigold'] body { background-color: #030b06 !important; }
-[data-theme='marigold'] .bg-\[\#0b0f19\] { background-color: #030b06 !important; }
-[data-theme='marigold'] .bg-\[\#0f172a\] { background-color: #07150d !important; }
-[data-theme='marigold'] .bg-\[\#070a13\] { background-color: #040f09 !important; }
-[data-theme='marigold'] .bg-\[\#121b2e\] { background-color: #112c1b !important; }
-[data-theme='marigold'] .bg-\[\#1e293b\] { background-color: #0e2617 !important; }
-[data-theme='marigold'] .bg-slate-900 { background-color: #030b06 !important; }
-[data-theme='marigold'] .bg-slate-950\/80 { background-color: rgba(3, 11, 6, 0.8) !important; }
+[data-theme='marigold'] body { background-color: #0b1f13 !important; }
+[data-theme='marigold'] .bg-\[\#0b0f19\] { background-color: #0b1f13 !important; }
+[data-theme='marigold'] .bg-\[\#0f172a\] { background-color: #143220 !important; }
+[data-theme='marigold'] .bg-\[\#070a13\] { background-color: #06130b !important; }
+[data-theme='marigold'] .bg-\[\#121b2e\] { background-color: #17432b !important; }
+[data-theme='marigold'] .bg-\[\#1e293b\] { background-color: #1b4d32 !important; }
+[data-theme='marigold'] .bg-slate-900 { background-color: #0b1f13 !important; }
+[data-theme='marigold'] .bg-slate-950\/80 { background-color: rgba(11, 31, 19, 0.8) !important; }
 [data-theme='marigold'] .border-slate-800 { border-color: #0f3d23 !important; }
-[data-theme='marigold'] .border-slate-700 { border-color: #14532d/40 !important; }
+[data-theme='marigold'] .border-slate-700 { border-color: rgba(20, 83, 45, 0.4) !important; }
 [data-theme='marigold'] .bg-brand-500 { background-color: #20bf6b !important; }
 [data-theme='marigold'] .bg-brand-600 { background-color: #26de81 !important; }
 [data-theme='marigold'] .bg-brand-650 { background-color: #0f9b58 !important; }

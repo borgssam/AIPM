@@ -416,6 +416,10 @@ class ProjectSettingUpdate(BaseModel):
 
 ### 4.2 글로벌 CSS 선택자 정의
 `index.css` 내에서 `[data-theme='dolphin']`, `[data-theme='sunflower']`, `[data-theme='marigold']` 클래스 하위의 색상 스타일을 오버라이딩합니다.
-*   `dolphin` (돌고래 - 푸른 바다): 진한 바다 파랑 바탕 및 스카이 블루/사이언 브랜드 포인트
-*   `sunflower` (해바라기 - 노랑/주황): 웜 챠콜 및 해바라기 옐로우/오렌지 포인트
-*   `marigold` (금잔디 - 녹색/연두): 다크 포레스트 그린 바탕 및 연두/에메랄드/민트 포인트
+*   `dolphin` (돌고래 - 푸른 바다): 진한 바다 파랑 바탕 (`#0a192f` for min-h-screen/body) 및 스카이 블루/사이언 브랜드 포인트
+*   `sunflower` (해바라기 - 노랑/주황): 웜 챠콜 바탕 (`#1c1917` for min-h-screen/body) 및 해바라기 옐로우/오렌지 포인트
+*   `marigold` (금잔디 - 녹색/연두): 다크 포레스트 그린 바탕 (`#0b1f13` for min-h-screen/body) 및 연두/에메랄드/민트 포인트
+
+### 4.3 칸반보드 인공지능 플링크 연동
+*   **버튼 디자인 & 배치:** 칸반 탭 상단 "새 할 일 추가" 버튼 오른쪽에 🤖 아이콘이 포함된 그라디언트 형태의 "인공지능 플링크" 버튼을 구현합니다.
+*   **권한 및 동작:** 본 버튼은 PM 권한을 가진 사용자에게 노출되며, 클릭 시 활성화 탭 상태(`activeTab`)를 `'project_create'`로 전환하여 신속하게 AI 일정 기획 화면으로 사용자를 연결(Link)시켜 줍니다.
