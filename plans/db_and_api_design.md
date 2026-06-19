@@ -61,7 +61,7 @@ SQLite와 PostgreSQL 간의 호환성을 유지하기 위해 데이터 타입은
 | **id** | `INTEGER` | `Integer` | Primary Key, Auto-increment | 검수 항목 고유 ID |
 | **ticket_id** | `INTEGER` | `Integer` | Foreign Key (kanban_tickets.id), NOT NULL | 매핑된 칸반 티켓 ID |
 | **category** | `VARCHAR(50)` | `String(50)` | NOT NULL | 검수 구분 (`FUNCTIONAL` / `QUALITY`) |
-| **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 검수 요건 내용 |
+| **title** | `VARCHAR(255)` | `String(255)` | NOT NULL | 검수 요건 내용 (기능 검증 요건 또는 품질조건) |
 | **status** | `VARCHAR(20)` | `String(20)` | NOT NULL, Default: 'UNTESTED' | 검수 상태 (`UNTESTED`, `PASS`/`TESTED`, `FAIL`, `APPROVED`) |
 | **created_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 생성 일시 |
 | **updated_at** | `TIMESTAMP` | `DateTime` | NOT NULL, Default: CURRENT_TIMESTAMP | 최종 업데이트 일시 |

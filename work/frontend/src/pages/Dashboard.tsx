@@ -149,7 +149,7 @@ export const Dashboard: FC = () => {
     need_functional_qa: false,
     functional_qa_title: '기능 검수',
     need_quality_qa: false,
-    quality_qa_title: '품질 검수'
+    quality_qa_title: ''
   });
 
   // 전체 팀원 목록 상태
@@ -476,7 +476,7 @@ export const Dashboard: FC = () => {
       need_functional_qa: false,
       functional_qa_title: '기능 검수 요건 기술',
       need_quality_qa: false,
-      quality_qa_title: '품질 검수 요건 기술'
+      quality_qa_title: ''
     });
     setIsTicketModalOpen(true);
   };
@@ -496,7 +496,7 @@ export const Dashboard: FC = () => {
       need_functional_qa: !!funcItem,
       functional_qa_title: funcItem ? funcItem.title : '기능 검수 요건 기술',
       need_quality_qa: !!qualItem,
-      quality_qa_title: qualItem ? qualItem.title : '품질 검수 요건 기술'
+      quality_qa_title: qualItem ? qualItem.title : ''
     });
     setIsTicketModalOpen(true);
   };
@@ -1484,7 +1484,7 @@ export const Dashboard: FC = () => {
                   <tr>
                     <th className="px-6 py-3.5 font-semibold">검수 ID</th>
                     <th className="px-6 py-3.5 font-semibold">연계 칸반 티켓</th>
-                    <th className="px-6 py-3.5 font-semibold">품질 검증 세부 요건</th>
+                    <th className="px-6 py-3.5 font-semibold">품질조건</th>
                     <th className="px-6 py-3.5 font-semibold text-center">검수 상태 및 관리</th>
                   </tr>
                 </thead>
@@ -1858,7 +1858,7 @@ export const Dashboard: FC = () => {
                       type="text"
                       value={ticketFormData.quality_qa_title}
                       onChange={(e) => setTicketFormData({ ...ticketFormData, quality_qa_title: e.target.value })}
-                      placeholder="품질 검증 요건을 구체적으로 입력하세요."
+                      placeholder="품질조건을 구체적으로 입력하세요."
                       className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
                     />
                   )}
