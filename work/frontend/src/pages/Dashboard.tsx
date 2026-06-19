@@ -111,6 +111,33 @@ export const Dashboard: FC = () => {
   // 칸반 새 할 일 생성 및 내용 수정 모달 관련 상태
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+
+  // 인공지능 플링크 모달 관련 상태
+  const [isAiFlinkModalOpen, setIsAiFlinkModalOpen] = useState(false);
+  const [selectedEpicIdForFlink, setSelectedEpicIdForFlink] = useState<number | ''>('');
+  const [excludeExistingTasks, setExcludeExistingTasks] = useState(false);
+  const [flinkRecommendations, setFlinkRecommendations] = useState<Array<{
+    id: number;
+    title: string;
+    description: string;
+    priority: 'P0' | 'P1' | 'P2';
+    selected: boolean;
+  }>>([]);
+
+  const handleGetFlinkRecommendations = () => {
+    // UI 뼈대 시연용 Mock 데이터 설정
+    setFlinkRecommendations([
+      { id: 1, title: '로그인 페이지 컴포넌트 마크업', description: '기본 테마가 적용된 로그인 폼 UI 구현', priority: 'P1', selected: true },
+      { id: 2, title: '사용자 JWT 토큰 만료 핸들러 작성', description: 'API 호출 에러 발생 시 토큰 만료 판별 및 세션 클리어', priority: 'P0', selected: false },
+      { id: 3, title: '회원가입 비밀번호 정규식 유효성 검증', description: '8자 이상 영문 대소문자 특수문자 조합 정규식 적용', priority: 'P2', selected: true }
+    ]);
+  };
+
+  const handleToggleRecommendSelect = (id: number) => {
+    setFlinkRecommendations(prev =>
+      prev.map(item => item.id === id ? { ...item, selected: !item.selected } : item)
+    );
+  };
   const [ticketFormData, setTicketFormData] = useState({
     id: undefined as number | undefined,
     title: '',
@@ -1022,7 +1049,12 @@ export const Dashboard: FC = () => {
                 </Button>
                 {currentUser && currentUser.role === 'PM' && (
                   <Button 
-                    onClick={() => setActiveTab('project_create')}
+                    onClick={() => {
+                      setIsAiFlinkModalOpen(true);
+                      setSelectedEpicIdForFlink('');
+                      setExcludeExistingTasks(false);
+                      setFlinkRecommendations([]);
+                    }}
                     className="px-3 py-1.5 flex items-center gap-1 text-xs bg-gradient-to-r from-purple-650 to-indigo-650 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md shadow-indigo-500/20"
                   >
                     🤖 인공지능 플링크
@@ -1846,6 +1878,140 @@ export const Dashboard: FC = () => {
                 className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
               >
                 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🤖 인공지능 플링크 추천 모달 */}
+      {isAiFlinkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            {/* Header */}
+            <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                🤖 인공지능 플링크 할 일 추천
+              </h3>
+              <button 
+                onClick={() => setIsAiFlinkModalOpen(false)}
+                className="text-slate-400 hover:text-white transition text-lg font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              {/* 에픽선택 콤보박스 */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  에픽 선택
+                </label>
+                <select 
+                  value={selectedEpicIdForFlink}
+                  onChange={(e) => setSelectedEpicIdForFlink(e.target.value ? Number(e.target.value) : '')}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  <option value="">-- 에픽을 선택하세요 --</option>
+                  {epics.map((epic) => (
+                    <option key={epic.id} value={epic.id}>
+                      {epic.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 기존할일제외 체크박스 */}
+              <div className="flex items-center">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-350 cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={excludeExistingTasks}
+                    onChange={(e) => setExcludeExistingTasks(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer" 
+                  />
+                  기존할일제외
+                </label>
+              </div>
+
+              {/* 추천받기 버튼 */}
+              <div className="flex justify-start">
+                <Button 
+                  onClick={handleGetFlinkRecommendations}
+                  className="px-4 py-2 flex items-center gap-1.5 text-xs bg-gradient-to-r from-blue-500 to-brand-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-brand-650 shadow"
+                >
+                  추천받기
+                </Button>
+              </div>
+
+              {/* AI 추천 할 일 리스트 그리드 */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  AI 추천 할 일 목록
+                </label>
+                <div className="border border-slate-700 rounded-lg overflow-hidden bg-slate-900 max-h-[220px] overflow-y-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-[#121b2e] border-b border-slate-750 text-slate-300 font-semibold sticky top-0">
+                      <tr>
+                        <th className="p-3 w-12 text-center">선택</th>
+                        <th className="p-3 w-1/3">할 일 제목</th>
+                        <th className="p-3">상세 내용</th>
+                        <th className="p-3 w-16 text-center">우선순위</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-slate-200">
+                      {flinkRecommendations.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-8 text-center text-slate-500 italic">
+                            추천받기 버튼을 클릭하여 AI 추천 목록을 생성해 보세요.
+                          </td>
+                        </tr>
+                      ) : (
+                        flinkRecommendations.map((item) => (
+                          <tr key={item.id} className="hover:bg-[#0f172a]/40 transition">
+                            <td className="p-3 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={item.selected}
+                                onChange={() => handleToggleRecommendSelect(item.id)}
+                                className="rounded bg-slate-950 border-slate-700 text-brand-500 focus:ring-brand-500 w-3.5 h-3.5 cursor-pointer"
+                              />
+                            </td>
+                            <td className="p-3 font-semibold text-white">{item.title}</td>
+                            <td className="p-3 text-slate-450">{item.description}</td>
+                            <td className="p-3 text-center">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${
+                                item.priority === 'P0' ? 'bg-red-600' : item.priority === 'P2' ? 'bg-purple-600' : 'bg-brand-600'
+                              }`}>
+                                {item.priority}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions: 적용 / 닫기 */}
+            <div className="bg-[#121b2e] border-t border-slate-700 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsAiFlinkModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 text-slate-350 hover:bg-slate-700 hover:text-white rounded-lg text-xs font-semibold transition"
+              >
+                닫기
+              </button>
+              <button 
+                onClick={() => {
+                  // 적용 기능은 현재 동작 단계 제외 (화면만 구현)
+                  setIsAiFlinkModalOpen(false);
+                }}
+                className="px-4 py-2 bg-brand-500 text-white hover:bg-brand-600 rounded-lg text-xs font-semibold transition shadow-md shadow-brand-500/20"
+              >
+                적용
               </button>
             </div>
           </div>
