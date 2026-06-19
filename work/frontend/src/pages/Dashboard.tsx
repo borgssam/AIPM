@@ -229,7 +229,10 @@ export const Dashboard: FC = () => {
   };
 
   const getEpicTicketStats = (epicId: number) => {
-    const epicTickets = tickets.filter(t => t.epic_ids && t.epic_ids.includes(epicId));
+    let epicTickets = tickets.filter(t => t.epic_ids && t.epic_ids.includes(epicId));
+    if (myTasksOnly && currentUser) {
+      epicTickets = epicTickets.filter(t => t.assignee_id === currentUser.id);
+    }
     const total = epicTickets.length;
     const done = epicTickets.filter(t => t.status === 'DONE').length;
     const todo = epicTickets.filter(t => t.status === 'TO_DO').length;
@@ -472,21 +475,42 @@ export const Dashboard: FC = () => {
   };
 
   const handleSaveEpicDates = async () => {
-    if (!editingEpic) return;
+    if (!editingEpic) {
+      console.warn('handleSaveEpicDates called but editingEpic is null.');
+      return;
+    }
+    if (editEpicStartDate && editEpicDueDate && new Date(editEpicStartDate) > new Date(editEpicDueDate)) {
+      setApiError("시작일은 마감일보다 늦을 수 없습니다.");
+      setTimeout(() => setApiError(''), 3500);
+      return;
+    }
+    console.log('Attempting to save epic dates:', {
+      epicId: editingEpic.id,
+      start_date: editEpicStartDate,
+      due_date: editEpicDueDate
+    });
     try {
       setLoading(true);
-      await axiosInstance.put(`/epics/${editingEpic.id}`, {
+      setApiError('');
+      setApiSuccess('');
+      
+      const payload = {
         start_date: editEpicStartDate || null,
         due_date: editEpicDueDate || null
-      });
+      };
+
+      const response = await axiosInstance.put(`/epics/${editingEpic.id}`, payload);
+      console.log('Epic dates successfully saved. Response:', response.data);
+      
       setApiSuccess('에픽 일정이 성공적으로 수정되었습니다.');
       setEditingEpic(null);
-      fetchEpics();
+      await fetchEpics();
       setTimeout(() => setApiSuccess(''), 3000);
     } catch (err: any) {
-      console.error(err);
-      setApiError('에픽 일정 수정에 실패했습니다.');
-      setTimeout(() => setApiError(''), 3500);
+      console.error('Failed to update epic dates:', err);
+      const errMsg = err.response?.data?.detail || err.message || '에픽 일정 수정에 실패했습니다.';
+      setApiError(`에픽 일정 수정 실패: ${errMsg}`);
+      setTimeout(() => setApiError(''), 4500);
     } finally {
       setLoading(false);
     }
@@ -513,6 +537,11 @@ export const Dashboard: FC = () => {
     }
     if (selectedProjectId === null) {
       setApiError('선택된 프로젝트가 없습니다.');
+      setTimeout(() => setApiError(''), 3500);
+      return;
+    }
+    if (epicCreateStartDate && epicCreateDueDate && new Date(epicCreateStartDate) > new Date(epicCreateDueDate)) {
+      setApiError("시작일은 마감일보다 늦을 수 없습니다.");
       setTimeout(() => setApiError(''), 3500);
       return;
     }
@@ -690,10 +719,31 @@ export const Dashboard: FC = () => {
     }
   };
 
+  // ==================== [데이터 연계 필터링] ====================
+  const filteredTickets = tickets.filter(t => {
+    const matchesSearch = searchQuery.trim() === '' || 
+      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+    const matchesPriority = priorityFilter === 'ALL' || t.priority === priorityFilter;
+
+    const matchesMyTasks = !myTasksOnly || (currentUser && t.assignee_id === currentUser.id);
+    
+    const matchesEpic = epicFilter === 'ALL' || (t.epic_ids && t.epic_ids.includes(epicFilter));
+    
+    return matchesSearch && matchesPriority && matchesMyTasks && matchesEpic;
+  });
+
+  const filteredEpics = epics.filter(epic => {
+    if (!myTasksOnly) return true;
+    const epicTickets = tickets.filter(t => t.epic_ids && t.epic_ids.includes(epic.id));
+    return epicTickets.some(t => currentUser && t.assignee_id === currentUser.id);
+  });
+
   // ==================== [간트 차트용 날짜 연산 함수] ====================
   const getGanttDateRange = () => {
     // start_date와 due_date가 존재하는 에픽만 필터링
-    const datedEpics = epics.filter(e => e.start_date && e.due_date);
+    const datedEpics = filteredEpics.filter(e => e.start_date && e.due_date);
     if (datedEpics.length === 0) {
       const today = new Date();
       const nextWeek = new Date();
@@ -768,21 +818,6 @@ export const Dashboard: FC = () => {
     }
   };
 
-  // ==================== [데이터 연계 필터링] ====================
-  const filteredTickets = tickets.filter(t => {
-    const matchesSearch = searchQuery.trim() === '' || 
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-    const matchesPriority = priorityFilter === 'ALL' || t.priority === priorityFilter;
-
-    const matchesMyTasks = !myTasksOnly || (currentUser && t.assignee_id === currentUser.id);
-    
-    const matchesEpic = epicFilter === 'ALL' || (t.epic_ids && t.epic_ids.includes(epicFilter));
-    
-    return matchesSearch && matchesPriority && matchesMyTasks && matchesEpic;
-  });
-
   // QA 검수 상태 필터 조건
   const matchesQaStatus = (item: QAItemResponse) => {
     if (qaFilter === 'ALL') return true;
@@ -793,18 +828,22 @@ export const Dashboard: FC = () => {
   };
 
   // 기능검수 QA 항목 추출
-  const functionalQaItems = tickets.flatMap(t => 
-    t.qa_items
-      .filter(item => item.category === 'FUNCTIONAL' && matchesQaStatus(item))
-      .map(item => ({ ...item, ticketTitle: t.title }))
-  );
+  const functionalQaItems = tickets
+    .filter(t => !myTasksOnly || (currentUser && t.assignee_id === currentUser.id))
+    .flatMap(t => 
+      t.qa_items
+        .filter(item => item.category === 'FUNCTIONAL' && matchesQaStatus(item))
+        .map(item => ({ ...item, ticketTitle: t.title }))
+    );
 
   // 품질검수 QA 항목 추출
-  const qualityQaItems = tickets.flatMap(t => 
-    t.qa_items
-      .filter(item => item.category === 'QUALITY' && matchesQaStatus(item))
-      .map(item => ({ ...item, ticketTitle: t.title }))
-  );
+  const qualityQaItems = tickets
+    .filter(t => !myTasksOnly || (currentUser && t.assignee_id === currentUser.id))
+    .flatMap(t => 
+      t.qa_items
+        .filter(item => item.category === 'QUALITY' && matchesQaStatus(item))
+        .map(item => ({ ...item, ticketTitle: t.title }))
+    );
 
   return (
     <div className="bg-[#0f172a] border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
@@ -1072,7 +1111,7 @@ export const Dashboard: FC = () => {
 
                   {/* 간트 가로 막대바 데이터 리스트 */}
                   <div className="divide-y divide-slate-850 space-y-3 pt-3">
-                    {epics.map((epic) => {
+                    {filteredEpics.map((epic) => {
                       const hasDates = epic.start_date && epic.due_date;
                       const barStyle = getGanttBarStyle(epic.start_date, epic.due_date);
                       const isAiDetected = epic.title.startsWith('[AI-Detected]');
