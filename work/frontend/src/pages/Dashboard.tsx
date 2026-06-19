@@ -105,6 +105,9 @@ export const Dashboard: FC = () => {
   // 칸반 내 담당 작업 필터링 상태
   const [myTasksOnly, setMyTasksOnly] = useState(false);
 
+  // 칸반 내 에픽 필터링 상태
+  const [epicFilter, setEpicFilter] = useState<'ALL' | number>('ALL');
+
   // QA 상태 필터링 상태
   const [qaFilter, setQaFilter] = useState<'ALL' | 'UNTESTED' | 'TESTED' | 'APPROVED'>('ALL');
 
@@ -223,6 +226,28 @@ export const Dashboard: FC = () => {
     setFlinkRecommendations(prev =>
       prev.map(item => item.id === id ? { ...item, selected: !item.selected } : item)
     );
+  };
+
+  const getEpicTicketStats = (epicId: number) => {
+    const epicTickets = tickets.filter(t => t.epic_ids && t.epic_ids.includes(epicId));
+    const total = epicTickets.length;
+    const done = epicTickets.filter(t => t.status === 'DONE').length;
+    const todo = epicTickets.filter(t => t.status === 'TO_DO').length;
+    const progressOrReview = epicTickets.filter(t => t.status === 'IN_PROGRESS' || t.status === 'TO_REVIEW').length;
+    const percent = total > 0 ? Math.floor((done / total) * 100) : 0;
+    return {
+      total,
+      done,
+      todo,
+      progressOrReview,
+      percent,
+      text: `총:${total}/완료:${done}/진행+검토:${progressOrReview}/대기:${todo}   진행율:${percent}%`
+    };
+  };
+
+  const handleNavigateToKanbanWithEpic = (epicId: number) => {
+    setEpicFilter(epicId);
+    setActiveTab('kanban');
   };
   const [ticketFormData, setTicketFormData] = useState({
     id: undefined as number | undefined,
@@ -364,6 +389,11 @@ export const Dashboard: FC = () => {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  // 프로젝트 변경 시 에픽 필터 초기화
+  useEffect(() => {
+    setEpicFilter('ALL');
+  }, [selectedProjectId]);
 
   // 탭 전환 시 및 선택된 프로젝트 변경 시 티켓 및 에픽 정보 갱신
   useEffect(() => {
@@ -748,7 +778,9 @@ export const Dashboard: FC = () => {
 
     const matchesMyTasks = !myTasksOnly || (currentUser && t.assignee_id === currentUser.id);
     
-    return matchesSearch && matchesPriority && matchesMyTasks;
+    const matchesEpic = epicFilter === 'ALL' || (t.epic_ids && t.epic_ids.includes(epicFilter));
+    
+    return matchesSearch && matchesPriority && matchesMyTasks && matchesEpic;
   });
 
   // QA 검수 상태 필터 조건
@@ -840,24 +872,39 @@ export const Dashboard: FC = () => {
       {/* 활성 프로젝트 선택 글로벌 드롭다운 (프로젝트 생성 탭이 아닐 경우 상시 표출) */}
       {activeTab !== 'project_create' && (
         <div className="bg-[#121b2e] border-b border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">선택한 프로젝트:</label>
-            {projects.length > 0 ? (
-              <select
-                value={selectedProjectId || ''}
-                onChange={(e) => setSelectedProjectId(Number(e.target.value))}
-                className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer min-w-[200px]"
-              >
-                {projects.map((proj) => (
-                  <option key={proj.id} value={proj.id}>{proj.name}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="text-xs text-amber-400 font-medium">
-                {currentUser && currentUser.role === 'PM' 
-                  ? "⚠️ 등록된 프로젝트가 없습니다. '프로젝트 생성' 탭에서 새 프로젝트를 등록해주세요." 
-                  : "⚠️ 등록된 프로젝트가 없습니다. PM에게 프로젝트 등록을 요청해 주세요."}
-              </span>
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">선택한 프로젝트:</label>
+              {projects.length > 0 ? (
+                <select
+                  value={selectedProjectId || ''}
+                  onChange={(e) => setSelectedProjectId(Number(e.target.value))}
+                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer min-w-[200px]"
+                >
+                  {projects.map((proj) => (
+                    <option key={proj.id} value={proj.id}>{proj.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs text-amber-400 font-medium">
+                  {currentUser && currentUser.role === 'PM' 
+                    ? "⚠️ 등록된 프로젝트가 없습니다. '프로젝트 생성' 탭에서 새 프로젝트를 등록해주세요." 
+                    : "⚠️ 등록된 프로젝트가 없습니다. PM에게 프로젝트 등록을 요청해 주세요."}
+                </span>
+              )}
+            </div>
+
+            {/* 내 담당 작업만 보기 체크박스 (글로벌 이동) */}
+            {projects.length > 0 && (
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none border-l border-slate-800 pl-6 h-5">
+                <input 
+                  type="checkbox" 
+                  checked={myTasksOnly}
+                  onChange={(e) => setMyTasksOnly(e.target.checked)}
+                  className="rounded bg-[#1e293b] border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer" 
+                />
+                내 담당 작업만 보기
+              </label>
             )}
           </div>
           {projects.length > 0 && (
@@ -1034,7 +1081,8 @@ export const Dashboard: FC = () => {
                       return (
                         <div key={epic.id} className="flex items-center py-2 hover:bg-[#0f172a]/20 rounded transition">
                           {/* 왼쪽 태스크 라벨 정보 */}
-                          <div className="w-[280px] flex-shrink-0 pr-4">
+                          <div className="w-[280px] flex-shrink-0 pr-4 space-y-1">
+                            {/* 1번째 줄: 제목 */}
                             <div className="flex items-center gap-2">
                               {isAiDetected ? (
                                 <span className="bg-amber-950/40 border border-amber-600/30 text-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
@@ -1045,19 +1093,34 @@ export const Dashboard: FC = () => {
                                   EPIC
                                 </span>
                               )}
-                              <h4 className="font-medium text-slate-200 text-sm truncate" title={epic.title}>{epic.title}</h4>
+                              <h4 className="font-medium text-slate-200 text-sm truncate" title={epic.title}>
+                                {epic.title}
+                              </h4>
                             </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
+                            
+                            {/* 2번째 줄: 날짜 */}
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
                               <span>시작: {epic.start_date || '미지정'}</span>
                               <span>마감: {epic.due_date || '미지정'}</span>
                               {currentUser && currentUser.role === 'PM' && (
                                 <button 
                                   onClick={() => handleOpenEditEpicModal(epic)}
-                                  className="text-brand-400 hover:text-brand-300 transition underline cursor-pointer ml-1"
+                                  className="px-2 py-0.5 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/30 hover:border-brand-500/50 text-brand-300 hover:text-white text-[9px] font-semibold rounded-md transition select-none cursor-pointer ml-1.5 shadow-sm"
                                 >
                                   기간 수정
                                 </button>
                               )}
+                            </div>
+
+                            {/* 3번째 줄: 진행도 및 칸반보드 바로가기 버튼 */}
+                            <div className="text-[10px] text-slate-400 font-medium flex items-center justify-between gap-2 mt-1">
+                              <span className="truncate">{getEpicTicketStats(epic.id).text}</span>
+                              <button
+                                onClick={() => handleNavigateToKanbanWithEpic(epic.id)}
+                                className="flex-shrink-0 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white text-[9px] font-semibold rounded-md transition select-none cursor-pointer shadow-sm"
+                              >
+                                칸반보드
+                              </button>
                             </div>
                           </div>
 
@@ -1076,9 +1139,9 @@ export const Dashboard: FC = () => {
                                 style={barStyle}
                                 onClick={() => { if(currentUser?.role === 'PM') handleOpenEditEpicModal(epic); }}
                                 className={`absolute h-4 top-1 rounded-full bg-gradient-to-r ${priorityColor} shadow-md flex items-center px-2 text-[9px] text-white font-bold select-none cursor-pointer hover:scale-[1.01] transition transform`}
-                                title={`${epic.title} (${epic.start_date} ~ ${epic.due_date})`}
+                                title={`${epic.title} - ${getEpicTicketStats(epic.id).text} (${epic.start_date} ~ ${epic.due_date})`}
                               >
-                                <span className="truncate">{epic.title}</span>
+                                <span className="truncate">{epic.title} ({getEpicTicketStats(epic.id).percent}%)</span>
                               </div>
                             )}
                           </div>
@@ -1115,17 +1178,20 @@ export const Dashboard: FC = () => {
                   <option value="P1">P1 (보통/핵심)</option>
                   <option value="P2">P2 (낮음)</option>
                 </select>
+                <select 
+                  value={epicFilter}
+                  onChange={(e) => setEpicFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                  className="px-3 py-2 bg-[#1e293b] border border-slate-700 rounded-lg text-white focus:outline-none text-sm cursor-pointer"
+                >
+                  <option value="ALL">에픽 (전체)</option>
+                  {epics.map((epic) => (
+                    <option key={epic.id} value={epic.id}>
+                      {epic.title}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none">
-                  <input 
-                    type="checkbox" 
-                    checked={myTasksOnly}
-                    onChange={(e) => setMyTasksOnly(e.target.checked)}
-                    className="rounded bg-[#1e293b] border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4" 
-                  />
-                  내 담당 작업만 보기
-                </label>
                 <Button 
                   onClick={handleOpenCreateModal} 
                   disabled={selectedProjectId === null}
