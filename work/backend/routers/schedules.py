@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -8,19 +7,9 @@ from database import get_db
 import models
 import schemas
 import auth_utils
-import llm_service
-from slack_utils import send_slack_notification
+from agents import orchestrator_agent
 
 router = APIRouter()
-
-def parse_date(date_str: str, default_offset_days: int = 0) -> any:
-    """
-    날짜 문자열을 Python date 객체로 변환하며 실패 시 기본 오프셋 날짜를 산출해 반환합니다.
-    """
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%d").date()
-    except Exception:
-        return (datetime.today() + timedelta(days=default_offset_days)).date()
 
 @router.post("/generate", response_model=schemas.ScheduleGenerateResponse)
 def generate_schedule(
@@ -43,22 +32,51 @@ def generate_schedule(
             detail="프로젝트 이름을 입력해 주세요."
         )
 
-    # 1.2 중복 프로젝트 처리 (동일 프로젝트가 존재하면 덮어쓰기 위해 CASCADE 삭제)
+    # 1.2 실행할 에이전트가 최소 1개는 선택되어 있어야 함
+    if not req.create_schedule_board and not req.create_kanban_tasks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="일정보드 자동생성과 칸반보드 태스크 자동생성 중 최소 하나는 선택해야 합니다."
+        )
+
+    # 1.3 일정보드(에픽) 생성 시에는 요구명세서/기능명세서 내용이 반드시 필요함
+    if req.create_schedule_board and (not req.prd_content.strip() or not req.spec_content.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="일정보드를 생성하려면 요구명세서(PRD)와 기능명세서(Spec) 내용이 모두 필요합니다."
+        )
+
+    # 1.2 중복 프로젝트 처리
+    # - 일정보드를 새로 만드는 경우: 동일 이름 프로젝트가 있으면 덮어쓰기 위해 CASCADE 삭제 후 재생성
+    # - 칸반 태스크만 생성하는 경우: 기존 에픽(일정)이 필요하므로 기존 프로젝트를 재사용
     try:
         existing_project = db.query(models.Project).filter(models.Project.name == project_name).first()
-        if existing_project:
-            print(f"Overwriting project '{project_name}' (ID: {existing_project.id}). Deleting existing records...")
-            db.delete(existing_project)
+
+        if req.create_schedule_board:
+            if existing_project:
+                print(f"Overwriting project '{project_name}' (ID: {existing_project.id}). Deleting existing records...")
+                db.delete(existing_project)
+                db.flush()
+
+            project = models.Project(
+                name=project_name,
+                prd_content=req.prd_content,
+                spec_content=req.spec_content
+            )
+            db.add(project)
             db.flush()
-            
-        # 신규 프로젝트 적재
-        project = models.Project(
-            name=project_name,
-            prd_content=req.prd_content,
-            spec_content=req.spec_content
-        )
-        db.add(project)
-        db.flush()
+        else:
+            if not existing_project:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="칸반보드 태스크만 생성하려면 먼저 동일한 이름으로 일정보드가 생성된 프로젝트가 있어야 합니다."
+                )
+            existing_project.prd_content = req.prd_content
+            existing_project.spec_content = req.spec_content
+            project = existing_project
+            db.flush()
+    except HTTPException:
+        raise
     except Exception as db_err:
         db.rollback()
         print(f"Database error during project creation: {db_err}")
@@ -82,87 +100,28 @@ def generate_schedule(
         except Exception:
             pass
 
-    # 3. LLM AI 분석 호출
+    # 3. 오케스트레이션 에이전트 호출 (선택된 옵션에 따라 ScheduleAgent / TaskAgent를 조합 실행)
     try:
-        analysis_result = llm_service.analyze_specifications(
+        result = orchestrator_agent.run(
+            db=db,
+            project=project,
             prd_content=req.prd_content,
             spec_content=req.spec_content,
+            create_schedule_board=req.create_schedule_board,
+            create_kanban_tasks=req.create_kanban_tasks,
             existing_api_spec=existing_api_spec,
             existing_db_schema=existing_db_schema
         )
+        return result
+    except RuntimeError as agent_err:
+        print(f"Agent execution failed: {agent_err}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(agent_err)
+        )
     except Exception as e:
-        print(f"LLM Schedule generation failed: {e}")
+        print(f"AI schedule/task generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="명세서 파싱에 실패했습니다. 파일 형식 및 내용을 다시 확인해주세요."
-        )
-
-    epics_data = analysis_result.get("epics", [])
-    conflicts_data = analysis_result.get("conflicts", [])
-
-    created_epics = []
-    warning_count = 0
-
-    try:
-        # 4.1 개발 에픽 일정 저장
-        for epic_item in epics_data:
-            start_d = parse_date(epic_item.get("start_date"), 0)
-            due_d = parse_date(epic_item.get("due_date"), 5)
-            
-            db_epic = models.Epic(
-                project_id=project.id,
-                title=epic_item.get("title", "Generated Epic"),
-                description=epic_item.get("description", ""),
-                start_date=start_d,
-                due_date=due_d
-            )
-            db.add(db_epic)
-            db.flush()
-            created_epics.append(db_epic)
-
-        # 4.2 상충 경고 에픽 인서트 및 실시간 슬랙 알림 발송
-        for conflict_item in conflicts_data:
-            start_d = parse_date(conflict_item.get("start_date"), 0)
-            due_d = parse_date(conflict_item.get("due_date"), 0)
-            
-            title = conflict_item.get("title", "Logical Mismatch")
-            if not title.startswith("[AI-Detected]"):
-                title = f"[AI-Detected] {title}"
-                
-            db_conflict = models.Epic(
-                project_id=project.id,
-                title=title,
-                description=conflict_item.get("description", "logical contradiction detected in design spec."),
-                start_date=start_d,
-                due_date=due_d
-            )
-            db.add(db_conflict)
-            db.flush()
-            
-            warning_count += 1
-            created_epics.append(db_conflict)
-            
-            # 실시간 슬랙 웹훅 발송 트리거
-            slack_msg = f"⚠️ [AI-Detected] 기획 충돌 이슈가 등록되었습니다. WBS 타임라인을 확인해 주세요.\n*이슈 제목*: {title}\n*상세 내용*: {db_conflict.description}"
-            send_slack_notification(db, slack_msg)
-
-        # 트랜잭션 커밋 확정
-        db.commit()
-        
-        # 관계형 필드를 최신 상태로 바인딩하여 응답하기 위해 refresh
-        for e in created_epics:
-            db.refresh(e)
-            
-        return {
-            "created_epics_count": len(epics_data),
-            "warning_epics_count": warning_count,
-            "epics": created_epics
-        }
-
-    except Exception as db_err:
-        db.rollback()
-        print(f"Database error during schedule transaction: {db_err}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="일정 데이터베이스 저장 중 오류가 발생했습니다."
         )

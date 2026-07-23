@@ -122,15 +122,31 @@ class TicketUpdate(BaseModel):
     need_quality_qa: Optional[bool] = None
     quality_qa_title: Optional[str] = None
 
+class PrdGenerateRequest(BaseModel):
+    project_name: str = Field(..., json_schema_extra={"example": "반려동물 등록 시스템 개발"})
+
+class PrdGenerateResponse(BaseModel):
+    prd_content: str
+
+class SpecGenerateRequest(BaseModel):
+    project_name: str = Field(..., json_schema_extra={"example": "반려동물 등록 시스템 개발"})
+    prd_content: str = Field(..., json_schema_extra={"example": "# 요구명세서\n..."})
+
+class SpecGenerateResponse(BaseModel):
+    spec_content: str
+
 class ScheduleGenerateRequest(BaseModel):
     project_name: str = Field(..., json_schema_extra={"example": "신규 펫 프로젝트"})
     prd_content: str = Field(..., json_schema_extra={"example": "# 요구명세서\n..."})
     spec_content: str = Field(..., json_schema_extra={"example": "# 기능명세서\n..."})
+    create_schedule_board: bool = Field(True, description="ScheduleAgent를 실행하여 일정보드(에픽)를 자동 생성할지 여부")
+    create_kanban_tasks: bool = Field(False, description="TaskAgent를 실행하여 칸반보드 태스크를 자동 생성할지 여부")
 
 class ScheduleGenerateResponse(BaseModel):
     created_epics_count: int
     warning_epics_count: int
     epics: List[EpicResponse]
+    created_tickets_count: int = 0
 
 # --- 4. AI Flink 할 일 추천 관련 스키마 ---
 class TicketRecommendRequest(BaseModel):

@@ -1,4 +1,4 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '../components/Button';
 import axiosInstance from '../api/axiosInstance';
 import { 
@@ -11,6 +11,17 @@ import {
 } from 'lucide-react';
 
 type TabType = 'project_create' | 'schedule' | 'kanban' | 'functional_qa' | 'quality_qa';
+
+// AI 일괄 생성 팝업: 선택된 서브 에이전트별 진행 단계 정보
+type BulkStepKey = 'prd' | 'spec' | 'schedule' | 'task';
+type BulkStepStatus = 'pending' | 'running' | 'done' | 'error';
+
+interface BulkStep {
+  key: BulkStepKey;
+  label: string;
+  status: BulkStepStatus;
+  detail?: string;
+}
 
 interface EpicResponse {
   id: number;
@@ -84,6 +95,22 @@ export const Dashboard: FC = () => {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState('');
   const [apiSuccess, setApiSuccess] = useState('');
+
+  // 제목 옆 "일괄생성" 버튼 팝업 관련 상태 (PRD/Spec/일정(에픽)/칸반(태스크) 4단계 오케스트레이션)
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkOptPrd, setBulkOptPrd] = useState(true);
+  const [bulkOptSpec, setBulkOptSpec] = useState(true);
+  const [bulkOptSchedule, setBulkOptSchedule] = useState(true);
+  const [bulkOptTask, setBulkOptTask] = useState(true);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkSteps, setBulkSteps] = useState<BulkStep[]>([]);
+  const [bulkModalError, setBulkModalError] = useState('');
+
+  // 제목 기반 AI 요구명세서(PRD) 초안 생성 관련 상태
+  const [prdGenLoading, setPrdGenLoading] = useState(false);
+
+  // 제목 + 요구명세서 기반 AI 기능명세서(Spec) 초안 생성 관련 상태
+  const [specGenLoading, setSpecGenLoading] = useState(false);
 
   // 일정 수정 관련 상태
   const [editingTicket, setEditingTicket] = useState<TicketResponse | null>(null);
@@ -407,64 +434,226 @@ export const Dashboard: FC = () => {
     }
   }, [activeTab, selectedProjectId]);
 
-  // AI 일정 분석 및 일괄 생성 API 호출 연동 핸들러
-  const handleGenerateSchedule = async () => {
+  // 제목(Project Name)만으로 PrdAgent를 호출해 요구명세서(PRD) 초안을 생성하는 핸들러
+  const handleGeneratePrdDraft = async () => {
     setApiError('');
     setApiSuccess('');
 
     if (!projectName.trim()) {
-      setApiError('프로젝트 명을 기입해 주세요.');
+      setApiError('요구명세서 초안을 생성하려면 먼저 프로젝트 명을 기입해 주세요.');
       return;
     }
 
-    if (!prdContent.trim() || !specContent.trim()) {
-      setApiError('요구명세서(PRD)와 기능명세서(Spec) 내용을 모두 기입해 주세요.');
-      return;
-    }
-
-    setLoading(true);
+    setPrdGenLoading(true);
     try {
-      const response = await axiosInstance.post('/schedules/generate', {
-        project_name: projectName,
-        prd_content: prdContent,
-        spec_content: specContent
+      const response = await axiosInstance.post('/projects/generate-prd', {
+        project_name: projectName
       });
-
-      const { created_epics_count, warning_epics_count, epics: newEpics } = response.data;
-      setApiSuccess(`성공적으로 WBS 에픽 일정을 분해 및 생성했습니다! (에픽: ${created_epics_count}개, 상충 경고: ${warning_epics_count}개)`);
-      
-      // 기입 영역 비우기
-      setProjectName('');
-      setPrdContent('');
-      setSpecContent('');
-
-      // 프로젝트 목록 새로 로드하여 추가된 프로젝트 바인딩
-      const projectListResponse = await axiosInstance.get('/projects');
-      setProjects(projectListResponse.data);
-
-      // 신규 프로젝트 ID 추출 및 지정
-      if (newEpics.length > 0) {
-        const newProjId = newEpics[0].project_id;
-        setSelectedProjectId(newProjId);
-      }
-      
-      setEpics(newEpics);
-      
-      // 생성 완료 후 2초 뒤에 일정관리(간트 차트) 탭으로 뷰 이동
-      setTimeout(() => {
-        setActiveTab('schedule');
-        setApiSuccess('');
-      }, 2000);
-
+      setPrdContent(response.data.prd_content);
+      setApiSuccess('AI가 프로젝트 제목을 기반으로 요구명세서(PRD) 초안을 작성했습니다. 내용을 검토 및 보완해 주세요.');
     } catch (err: any) {
       console.error(err);
       if (err.response && err.response.data && err.response.data.detail) {
         setApiError(err.response.data.detail);
       } else {
-        setApiError('AI 일정 자동 생성 중 오류가 발생했습니다. 권한 및 기입 내용을 점검하세요.');
+        setApiError('요구명세서 초안 생성 중 오류가 발생했습니다.');
       }
     } finally {
-      setLoading(false);
+      setPrdGenLoading(false);
+    }
+  };
+
+  // 제목(Project Name) + 요구명세서(PRD)를 바탕으로 SpecAgent를 호출해 기능명세서(Spec) 초안을 생성하는 핸들러
+  const handleGenerateSpecDraft = async () => {
+    setApiError('');
+    setApiSuccess('');
+
+    if (!projectName.trim()) {
+      setApiError('기능명세서 초안을 생성하려면 먼저 프로젝트 명을 기입해 주세요.');
+      return;
+    }
+
+    if (!prdContent.trim()) {
+      setApiError('기능명세서 초안을 생성하려면 요구명세서(PRD) 내용이 먼저 필요합니다. PRD를 먼저 작성하거나 AI 초안을 생성해 주세요.');
+      return;
+    }
+
+    setSpecGenLoading(true);
+    try {
+      const response = await axiosInstance.post('/projects/generate-spec', {
+        project_name: projectName,
+        prd_content: prdContent
+      });
+      setSpecContent(response.data.spec_content);
+      setApiSuccess('AI가 프로젝트 제목과 요구명세서(PRD)를 기반으로 기능명세서(Spec) 초안을 작성했습니다. 내용을 검토 및 보완해 주세요.');
+    } catch (err: any) {
+      console.error(err);
+      if (err.response && err.response.data && err.response.data.detail) {
+        setApiError(err.response.data.detail);
+      } else {
+        setApiError('기능명세서 초안 생성 중 오류가 발생했습니다.');
+      }
+    } finally {
+      setSpecGenLoading(false);
+    }
+  };
+
+  // "일괄생성" 버튼 클릭 핸들러: 제목 옆 팝업을 연다 (제목은 팝업 내에서도 편집 가능)
+  const handleOpenBulkGenerateModal = () => {
+    setBulkModalError('');
+    setBulkRunning(false);
+    setBulkSteps([]);
+    setIsBulkModalOpen(true);
+  };
+
+  const handleCloseBulkGenerateModal = () => {
+    if (bulkRunning) return;
+    setIsBulkModalOpen(false);
+  };
+
+  // bulkSteps 배열 내 특정 단계(key)의 진행 상태를 갱신하는 헬퍼
+  const updateBulkStep = (key: BulkStepKey, status: BulkStepStatus, detail?: string) => {
+    setBulkSteps((prev) => prev.map((s) => (s.key === key ? { ...s, status, detail } : s)));
+  };
+
+  // 팝업의 "실행" 버튼 핸들러: 선택된 항목(PRD/Spec/일정(에픽)/칸반(태스크))을
+  // 순서대로 각 서브 에이전트 API를 호출하여 오케스트레이션하고, 단계별 진행 상황을 실시간으로 보여준다.
+  const handleRunBulkGenerate = async () => {
+    setBulkModalError('');
+
+    const targetProjectName = projectName.trim();
+    if (!targetProjectName) {
+      setBulkModalError('프로젝트 명을 입력해 주세요.');
+      return;
+    }
+
+    if (!bulkOptPrd && !bulkOptSpec && !bulkOptSchedule && !bulkOptTask) {
+      setBulkModalError('최소 하나 이상의 자동생성 항목을 선택해 주세요.');
+      return;
+    }
+
+    const steps: BulkStep[] = [];
+    if (bulkOptPrd) steps.push({ key: 'prd', label: '요구명세서(PRD) 자동생성', status: 'pending' });
+    if (bulkOptSpec) steps.push({ key: 'spec', label: '기능명세서(Spec) 자동생성', status: 'pending' });
+    if (bulkOptSchedule) steps.push({ key: 'schedule', label: '일정(에픽) 자동생성', status: 'pending' });
+    if (bulkOptTask) steps.push({ key: 'task', label: '칸반보드(태스크) 자동생성', status: 'pending' });
+
+    setBulkSteps(steps);
+    setBulkRunning(true);
+    setApiError('');
+    setApiSuccess('');
+
+    let currentPrd = prdContent;
+    let currentSpec = specContent;
+    let resultProjectId: number | null = null;
+    let resultEpics: EpicResponse[] = [];
+
+    try {
+      // 1단계: PrdAgent (제목 -> 요구명세서 초안)
+      if (bulkOptPrd) {
+        updateBulkStep('prd', 'running');
+        const res = await axiosInstance.post('/projects/generate-prd', {
+          project_name: targetProjectName
+        });
+        currentPrd = res.data.prd_content;
+        setPrdContent(currentPrd);
+        updateBulkStep('prd', 'done');
+      }
+
+      // 2단계: SpecAgent (제목 + 요구명세서 -> 기능명세서 초안)
+      if (bulkOptSpec) {
+        if (!currentPrd.trim()) {
+          updateBulkStep('spec', 'error', '요구명세서(PRD) 내용이 없어 생성할 수 없습니다.');
+          throw new Error('기능명세서를 생성하려면 요구명세서(PRD) 내용이 필요합니다. PRD 자동생성을 함께 선택하거나 PRD를 먼저 작성해 주세요.');
+        }
+        updateBulkStep('spec', 'running');
+        const res = await axiosInstance.post('/projects/generate-spec', {
+          project_name: targetProjectName,
+          prd_content: currentPrd
+        });
+        currentSpec = res.data.spec_content;
+        setSpecContent(currentSpec);
+        updateBulkStep('spec', 'done');
+      }
+
+      // 3단계: ScheduleAgent (제목 + 요구명세서 + 기능명세서 -> 에픽/일정보드, DB 저장)
+      if (bulkOptSchedule) {
+        if (!currentPrd.trim() || !currentSpec.trim()) {
+          updateBulkStep('schedule', 'error', '요구명세서/기능명세서 내용이 없어 생성할 수 없습니다.');
+          throw new Error('일정(에픽)을 생성하려면 요구명세서(PRD)와 기능명세서(Spec) 내용이 모두 필요합니다.');
+        }
+        updateBulkStep('schedule', 'running');
+        const res = await axiosInstance.post('/schedules/generate', {
+          project_name: targetProjectName,
+          prd_content: currentPrd,
+          spec_content: currentSpec,
+          create_schedule_board: true,
+          create_kanban_tasks: false
+        });
+        resultEpics = res.data.epics;
+        if (resultEpics.length > 0) {
+          resultProjectId = resultEpics[0].project_id;
+        }
+        updateBulkStep(
+          'schedule',
+          'done',
+          `에픽 ${res.data.created_epics_count}개, 상충 경고 ${res.data.warning_epics_count}개`
+        );
+      }
+
+      // 4단계: TaskAgent (에픽 -> 칸반 태스크, DB 저장). 3단계 없이 단독 실행 시 기존 에픽을 재사용한다.
+      if (bulkOptTask) {
+        updateBulkStep('task', 'running');
+        const res = await axiosInstance.post('/schedules/generate', {
+          project_name: targetProjectName,
+          prd_content: currentPrd,
+          spec_content: currentSpec,
+          create_schedule_board: false,
+          create_kanban_tasks: true
+        });
+        updateBulkStep('task', 'done', `칸반 태스크 ${res.data.created_tickets_count}개 생성`);
+      }
+
+      // 일정 또는 태스크 단계가 실제로 DB에 반영된 경우, 프로젝트 목록/선택 상태를 최신화
+      if (bulkOptSchedule || bulkOptTask) {
+        const projectListResponse = await axiosInstance.get('/projects');
+        setProjects(projectListResponse.data);
+
+        if (resultProjectId === null) {
+          const matchedProject = projectListResponse.data.find(
+            (p: { id: number; name: string }) => p.name === targetProjectName
+          );
+          if (matchedProject) {
+            resultProjectId = matchedProject.id;
+          }
+        }
+
+        if (resultProjectId !== null) {
+          setSelectedProjectId(resultProjectId);
+        }
+        if (resultEpics.length > 0) {
+          setEpics(resultEpics);
+        }
+
+        // 실제로 저장이 완료되었으므로 다음 입력을 위해 작성 폼을 비운다
+        setProjectName('');
+        setPrdContent('');
+        setSpecContent('');
+
+        setTimeout(() => {
+          setActiveTab(bulkOptTask && !bulkOptSchedule ? 'kanban' : 'schedule');
+          setIsBulkModalOpen(false);
+        }, 1500);
+      }
+
+      setApiSuccess('AI 일괄 생성이 모두 완료되었습니다!');
+    } catch (err: any) {
+      console.error(err);
+      const detailMsg = err.response?.data?.detail || err.message || '알 수 없는 오류가 발생했습니다.';
+      setBulkSteps((prev) => prev.map((s) => (s.status === 'running' ? { ...s, status: 'error', detail: detailMsg } : s)));
+      setBulkModalError(detailMsg);
+    } finally {
+      setBulkRunning(false);
     }
   };
 
@@ -789,6 +978,11 @@ export const Dashboard: FC = () => {
 
   const { minTime, maxTime, days, datesArray } = getGanttDateRange();
 
+  // 날짜 헤더의 날짜 칸 너비와 바 그래프 영역의 눈금 칸 너비를 반드시 동일한 값으로 고정해서
+  // 두 영역이 각자 다른 flex 계산으로 서로 다른 폭을 갖는(=눈금과 날짜가 어긋나는) 문제를 방지한다.
+  const GANTT_DAY_WIDTH = 32;
+  const ganttContentWidth = Math.max(520, datesArray.length * GANTT_DAY_WIDTH);
+
   // 간트 바의 left % 및 width % 계산
   const getGanttBarStyle = (startStr?: string, dueStr?: string) => {
     if (!startStr || !dueStr || days === 0) return { left: '0%', width: '0%' };
@@ -818,6 +1012,70 @@ export const Dashboard: FC = () => {
     }
   };
 
+  // ==================== [간트 차트: 바 그래프 영역만 실제로 스크롤되는 단일 마스터] ====================
+  // 에픽 라벨 열과 날짜 헤더는 자체 스크롤바를 갖지 않는다(overflow-hidden). 실제로 스크롤 가능한
+  // 영역은 바 그래프(ganttBodyRef) 하나뿐이며, 라벨 열/날짜 헤더는 바 영역의 스크롤 위치를
+  // JS로 그대로 반영만 한다. 또한 라벨 열이나 날짜 헤더 위에서 휠을 굴려도 그 입력이 바 영역의
+  // 스크롤로 전달되도록, 네이티브(non-passive) wheel 리스너를 콜백 ref로 등록한다.
+  const ganttLabelColRef = useRef<HTMLDivElement>(null);
+  const ganttLabelListRef = useRef<HTMLDivElement>(null);
+  const ganttDateHeaderRef = useRef<HTMLDivElement>(null);
+  const ganttBodyRef = useRef<HTMLDivElement>(null);
+  const [hoveredGanttEpicId, setHoveredGanttEpicId] = useState<number | null>(null);
+
+  // 에픽 라벨 열은 scrollTop을 그대로 복사하는 대신, 바 영역의 스크롤 위치를 CSS transform으로
+  // 직접 적용한다. 별개의 두 overflow 컨테이너끼리 scrollTop을 미러링하면 브라우저/타이밍에 따라
+  // 미세하게 어긋날 수 있는데, 같은 이벤트 핸들러 안에서 동일한 값을 한 번에 적용하는 transform 방식은
+  // 라벨과 바의 세로 위치가 항상 정확히 1:1로 고정되도록 보장한다.
+  const handleGanttBodyScroll = () => {
+    if (!ganttBodyRef.current) return;
+    const { scrollTop, scrollLeft } = ganttBodyRef.current;
+    if (ganttLabelListRef.current) {
+      ganttLabelListRef.current.style.transform = `translateY(-${scrollTop}px)`;
+    }
+    if (ganttDateHeaderRef.current) {
+      ganttDateHeaderRef.current.scrollLeft = scrollLeft;
+    }
+  };
+
+  // 특정 DOM 노드 위에서 발생하는 휠 이벤트를 바 그래프(마스터) 영역의 스크롤로 전달하는
+  // 네이티브 리스너를 등록/해제하는 콜백 ref 팩토리. React의 합성 onWheel은 기본적으로
+  // passive로 등록되어 preventDefault가 무시될 수 있으므로 addEventListener로 직접 등록한다.
+  const makeWheelForwardingRef = useCallback(
+    (targetRef: React.MutableRefObject<HTMLDivElement | null>, axis: 'x' | 'y') => {
+      let cleanup: (() => void) | undefined;
+      return (node: HTMLDivElement | null) => {
+        cleanup?.();
+        targetRef.current = node;
+        if (!node) return;
+        const handleWheel = (e: WheelEvent) => {
+          if (!ganttBodyRef.current) return;
+          e.preventDefault();
+          if (axis === 'x') {
+            const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+            ganttBodyRef.current.scrollLeft += delta;
+          } else {
+            ganttBodyRef.current.scrollTop += e.deltaY;
+          }
+        };
+        node.addEventListener('wheel', handleWheel, { passive: false });
+        cleanup = () => node.removeEventListener('wheel', handleWheel);
+      };
+    },
+    []
+  );
+
+  const setGanttLabelColNode = useRef(makeWheelForwardingRef(ganttLabelColRef, 'y')).current;
+  const setGanttDateHeaderNode = useRef(makeWheelForwardingRef(ganttDateHeaderRef, 'x')).current;
+
+  // 에픽 목록이 바뀌면(프로젝트/필터 변경 등) 바 영역의 스크롤 위치가 새로 리셋되므로,
+  // 라벨 열의 transform도 함께 0으로 되돌려 스크롤 이전 값이 남아 어긋나 보이는 것을 방지한다.
+  useEffect(() => {
+    if (ganttLabelListRef.current) {
+      ganttLabelListRef.current.style.transform = 'translateY(0px)';
+    }
+  }, [selectedProjectId, myTasksOnly, epics.length]);
+
   // QA 검수 상태 필터 조건
   const matchesQaStatus = (item: QAItemResponse) => {
     if (qaFilter === 'ALL') return true;
@@ -846,13 +1104,13 @@ export const Dashboard: FC = () => {
     );
 
   return (
-    <div className="bg-[#0f172a] border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
+    <div className="bg-[#0f172a] border border-slate-800 rounded-xl shadow-2xl overflow-hidden flex-1 flex flex-col">
       {/* 5대 핵심 탭 메뉴 네비게이션 */}
-      <div className="border-b border-slate-800 bg-[#070a13] px-6 py-3 flex flex-wrap gap-2">
+      <div className="border-b border-slate-800 bg-[#070a13] px-6 py-1.5 flex flex-wrap gap-2">
         {currentUser && currentUser.role === 'PM' && (
           <button 
             onClick={() => setActiveTab('project_create')}
-            className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+            className={`px-4 py-1 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
               activeTab === 'project_create' 
                 ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
                 : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
@@ -864,7 +1122,7 @@ export const Dashboard: FC = () => {
         )}
         <button 
           onClick={() => setActiveTab('schedule')}
-          className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+          className={`px-4 py-1 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
             activeTab === 'schedule' 
               ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
               : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
@@ -875,7 +1133,7 @@ export const Dashboard: FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('kanban')}
-          className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+          className={`px-4 py-1 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
             activeTab === 'kanban' 
               ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
               : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
@@ -886,7 +1144,7 @@ export const Dashboard: FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('functional_qa')}
-          className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+          className={`px-4 py-1 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
             activeTab === 'functional_qa' 
               ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
               : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
@@ -897,7 +1155,7 @@ export const Dashboard: FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('quality_qa')}
-          className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
+          className={`px-4 py-1 rounded-lg text-xs md:text-sm font-semibold transition duration-200 flex items-center gap-1.5 ${
             activeTab === 'quality_qa' 
               ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25' 
               : 'text-slate-400 hover:bg-[#1e293b] hover:text-slate-200'
@@ -961,13 +1219,13 @@ export const Dashboard: FC = () => {
       )}
 
       {/* 탭 개별 뷰 콘텐츠 영역 */}
-      <div className="p-6 md:p-8">
+      <div className="p-6 md:p-8 flex-1 overflow-y-auto">
         
         {/* ==================== [1. 프로젝트 생성 탭] ==================== */}
         {activeTab === 'project_create' && currentUser && currentUser.role === 'PM' && (
-          <div className="space-y-6">
+          <div className="h-full flex flex-col gap-6">
             <div>
-              <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+              <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
                 🚀 AI Project PM 명세 분석 프로젝트 가동
               </h3>
               <p className="text-slate-400 text-sm">기획서(PRD) 및 기능 동작 명세서(Spec) 내용을 입력하면 AI가 일정을 분해하여 WBS 티켓과 검수 항목을 일괄 생성합니다.</p>
@@ -987,74 +1245,96 @@ export const Dashboard: FC = () => {
             {/* 프로젝트 이름 기입란 */}
             <div className="bg-[#121b2e] p-4 rounded-lg border border-slate-800 space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Project Name (프로젝트 이름)</label>
-              <input
-                type="text"
-                placeholder="예: 반려동물 등록 시스템 개발 또는 신규 커머스 사이트"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                className="w-full px-4 py-2.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-semibold"
-                disabled={loading}
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="예: 반려동물 등록 시스템 개발 또는 신규 커머스 사이트"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className="flex-1 px-4 py-2.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-semibold"
+                  disabled={loading}
+                />
+                <Button
+                  onClick={handleOpenBulkGenerateModal}
+                  disabled={loading}
+                  className="px-4 py-2.5 whitespace-nowrap text-sm font-semibold flex items-center gap-1.5"
+                >
+                  ⚡ 일괄생성
+                </Button>
+              </div>
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2">Product Requirement Document (요구명세서 PRD)</label>
-                <textarea 
-                  rows={10}
-                  placeholder="# 요구명세서&#10;WBS로 나눌 개발 목표 요구 규격을 여기에 붙여넣거나 입력하세요."
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
+              <div className="flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-400">Product Requirement Document (요구명세서 PRD)</label>
+                  <button
+                    type="button"
+                    onClick={handleGeneratePrdDraft}
+                    disabled={loading || prdGenLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-brand-500/10 text-brand-400 border border-brand-500/30 hover:bg-brand-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {prdGenLoading ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin"></span>
+                        초안 생성 중...
+                      </>
+                    ) : (
+                      '🤖 제목으로 PRD 초안 생성'
+                    )}
+                  </button>
+                </div>
+                <textarea
+                  placeholder="# 요구명세서&#10;WBS로 나눌 개발 목표 요구 규격을 여기에 붙여넣거나 입력하세요. 또는 상단의 'PRD 초안 생성' 버튼으로 프로젝트 명만으로 AI 초안을 받아보세요."
                   value={prdContent}
                   onChange={(e) => setPrdContent(e.target.value)}
-                  className="w-full px-4 py-3 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-mono"
-                  disabled={loading}
+                  className="w-full flex-1 min-h-[200px] px-4 py-3 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-mono resize-none"
+                  disabled={loading || prdGenLoading}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2">Functional Specification (기능명세서 Spec)</label>
-                <textarea 
-                  rows={10}
-                  placeholder="# 기능명세서&#10;기능 단위 동작 스펙을 입력하세요. 기존 시스템과의 논리 상충 여부도 자동으로 분석해 드립니다."
+              <div className="flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-400">Functional Specification (기능명세서 Spec)</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateSpecDraft}
+                    disabled={loading || specGenLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-brand-500/10 text-brand-400 border border-brand-500/30 hover:bg-brand-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {specGenLoading ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin"></span>
+                        초안 생성 중...
+                      </>
+                    ) : (
+                      '🤖 제목+PRD로 기능명세서 초안 생성'
+                    )}
+                  </button>
+                </div>
+                <textarea
+                  placeholder="# 기능명세서&#10;기능 단위 동작 스펙을 입력하세요. 기존 시스템과의 논리 상충 여부도 자동으로 분석해 드립니다. 또는 상단의 '기능명세서 초안 생성' 버튼으로 제목과 PRD만으로 AI 초안을 받아보세요."
                   value={specContent}
                   onChange={(e) => setSpecContent(e.target.value)}
-                  className="w-full px-4 py-3 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-mono"
-                  disabled={loading}
+                  className="w-full flex-1 min-h-[200px] px-4 py-3 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm font-mono resize-none"
+                  disabled={loading || specGenLoading}
                 />
               </div>
-            </div>
-            
-            <div className="flex justify-end">
-              <Button 
-                onClick={handleGenerateSchedule}
-                disabled={loading}
-                className="px-6 py-2.5 shadow-lg shadow-brand-500/20 flex items-center gap-2 text-sm font-semibold"
-              >
-                {loading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    AI 명세 분석 중...
-                  </>
-                ) : (
-                  <>
-                    🤖 AI 일정 분석 및 일괄 생성 실행
-                  </>
-                )}
-              </Button>
             </div>
           </div>
         )}
 
         {/* ==================== [2. 일정관리 (Gantt Chart) 탭] ==================== */}
         {activeTab === 'schedule' && (
-          <div className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="h-full flex flex-col gap-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
               <div>
-                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
                   📊 프로젝트 타임라인 간트 차트 (Gantt Chart Timeline)
                 </h3>
                 <p className="text-slate-400 text-sm">각 개발 일정 티켓들의 시작일과 마감 마일스톤 범위를 시각적으로 가시화한 타임라인 그래프 뷰입니다.</p>
               </div>
               {currentUser && currentUser.role === 'PM' && (
-                <Button 
+                <Button
                   onClick={handleOpenCreateEpicModal}
                   disabled={selectedProjectId === null}
                   className="px-3 py-1.5 flex items-center gap-1 text-xs self-start md:self-auto"
@@ -1076,7 +1356,7 @@ export const Dashboard: FC = () => {
             )}
 
             {epics.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 border border-dashed border-slate-800 rounded-xl bg-[#070a13] text-center px-4">
+              <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-xl bg-[#070a13] text-center px-4">
                 <Calendar className="w-12 h-12 text-slate-600 mb-4 animate-bounce" />
                 <h4 className="text-white font-bold mb-1">생성된 WBS 에픽 일정이 없습니다.</h4>
                 <p className="text-slate-500 text-sm mb-4 max-w-sm">프로젝트 생성 탭에서 기획 문서를 입력하고 AI 분석을 가동하여 간트 차트 에픽 타임라인을 확인하세요.</p>
@@ -1092,43 +1372,34 @@ export const Dashboard: FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-x-auto p-6 shadow-lg">
-                <div className="min-w-[800px] space-y-4">
-                  {/* 타임라인 날짜 눈금 헤더 */}
-                  <div className="flex text-slate-400 text-xs font-bold border-b border-slate-850 pb-2">
-                    <div className="w-[280px] flex-shrink-0 text-slate-500 uppercase tracking-wider">개발 에픽 (일정명)</div>
-                    <div className="flex-1 relative flex justify-between px-2">
-                      {datesArray.map((dateObj, idx) => (
-                        <div key={idx} className="flex flex-col items-center flex-1 text-center border-l border-slate-850/50 min-w-[30px]">
-                          <span className="text-[9px] text-slate-500">{dateObj.toLocaleDateString('ko-KR', {month: 'numeric', day: 'numeric'})}</span>
-                          <span className="text-[8px] text-slate-600">
-                            {['일','월','화','수','목','금','토'][dateObj.getDay()]}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+              <div className="flex-1 min-h-0 bg-[#070a13] border border-slate-800 rounded-xl shadow-lg overflow-hidden flex">
+                {/* 좌측: 에픽 라벨 열 - 세로 스크롤만 가능(가로로는 절대 움직이지 않음), 바 그래프와는 완전히 분리된 별도 컨테이너 */}
+                <div className="w-[280px] flex-shrink-0 flex flex-col border-r border-slate-850">
+                  <div className="h-11 flex-shrink-0 flex items-center px-4 text-slate-500 text-xs font-bold uppercase tracking-wider border-b border-slate-850">
+                    개발 에픽 (일정명)
                   </div>
-
-                  {/* 간트 가로 막대바 데이터 리스트 */}
-                  <div className="divide-y divide-slate-850 space-y-3 pt-3">
-                    {filteredEpics.map((epic) => {
-                      const hasDates = epic.start_date && epic.due_date;
-                      const barStyle = getGanttBarStyle(epic.start_date, epic.due_date);
-                      const isAiDetected = epic.title.startsWith('[AI-Detected]');
-                      const priorityColor = isAiDetected ? 'from-amber-500 to-amber-600 shadow-amber-500/20' : 'from-blue-500 to-brand-600 shadow-brand-500/20';
-                      
-                      return (
-                        <div key={epic.id} className="flex items-center py-2 hover:bg-[#0f172a]/20 rounded transition">
-                          {/* 왼쪽 태스크 라벨 정보 */}
-                          <div className="w-[280px] flex-shrink-0 pr-4 space-y-1">
+                  <div
+                    ref={setGanttLabelColNode}
+                    className="flex-1 overflow-hidden"
+                  >
+                    <div ref={ganttLabelListRef} className="divide-y divide-slate-850 will-change-transform">
+                      {filteredEpics.map((epic) => {
+                        const isAiDetected = epic.title.startsWith('[AI-Detected]');
+                        return (
+                          <div
+                            key={epic.id}
+                            onMouseEnter={() => setHoveredGanttEpicId(epic.id)}
+                            onMouseLeave={() => setHoveredGanttEpicId(null)}
+                            className={`h-[76px] flex flex-col justify-center gap-1 px-4 overflow-hidden transition ${hoveredGanttEpicId === epic.id ? 'bg-[#0f172a]/40' : ''}`}
+                          >
                             {/* 1번째 줄: 제목 */}
                             <div className="flex items-center gap-2">
                               {isAiDetected ? (
-                                <span className="bg-amber-950/40 border border-amber-600/30 text-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <span className="bg-amber-950/40 border border-amber-600/30 text-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 flex-shrink-0">
                                   🤖 경고
                                 </span>
                               ) : (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white bg-brand-650">
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white bg-brand-650 flex-shrink-0">
                                   EPIC
                                 </span>
                               )}
@@ -1136,13 +1407,13 @@ export const Dashboard: FC = () => {
                                 {epic.title}
                               </h4>
                             </div>
-                            
+
                             {/* 2번째 줄: 날짜 */}
                             <div className="text-[10px] text-slate-500 flex items-center gap-2">
                               <span>시작: {epic.start_date || '미지정'}</span>
                               <span>마감: {epic.due_date || '미지정'}</span>
                               {currentUser && currentUser.role === 'PM' && (
-                                <button 
+                                <button
                                   onClick={() => handleOpenEditEpicModal(epic)}
                                   className="px-2 py-0.5 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/30 hover:border-brand-500/50 text-brand-300 hover:text-white text-[9px] font-semibold rounded-md transition select-none cursor-pointer ml-1.5 shadow-sm"
                                 >
@@ -1152,7 +1423,7 @@ export const Dashboard: FC = () => {
                             </div>
 
                             {/* 3번째 줄: 진행도 및 칸반보드 바로가기 버튼 */}
-                            <div className="text-[10px] text-slate-400 font-medium flex items-center justify-between gap-2 mt-1">
+                            <div className="text-[10px] text-slate-400 font-medium flex items-center justify-between gap-2">
                               <span className="truncate">{getEpicTicketStats(epic.id).text}</span>
                               <button
                                 onClick={() => handleNavigateToKanbanWithEpic(epic.id)}
@@ -1162,31 +1433,78 @@ export const Dashboard: FC = () => {
                               </button>
                             </div>
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
 
-                          {/* 오른쪽 가로 간트 바 렌더링 */}
-                          <div className="flex-1 relative h-6 bg-slate-900/30 rounded-lg">
-                            {/* 타임라인 격자 배경선 */}
-                            <div className="absolute inset-0 flex justify-between pointer-events-none">
-                              {datesArray.map((_, idx) => (
-                                <div key={idx} className="h-full border-r border-slate-850/15 flex-1" />
-                              ))}
-                            </div>
-
-                            {/* 간트 바 본체 */}
-                            {hasDates && (
-                              <div 
-                                style={barStyle}
-                                onClick={() => { if(currentUser?.role === 'PM') handleOpenEditEpicModal(epic); }}
-                                className={`absolute h-4 top-1 rounded-full bg-gradient-to-r ${priorityColor} shadow-md flex items-center px-2 text-[9px] text-white font-bold select-none cursor-pointer hover:scale-[1.01] transition transform`}
-                                title={`${epic.title} - ${getEpicTicketStats(epic.id).text} (${epic.start_date} ~ ${epic.due_date})`}
-                              >
-                                <span className="truncate">{epic.title} ({getEpicTicketStats(epic.id).percent}%)</span>
-                              </div>
-                            )}
-                          </div>
+                {/* 우측: 날짜 헤더(자체 스크롤 없음, 바 영역 스크롤을 그대로 반영) + 바 그래프(가로+세로 스크롤되는 유일한 마스터 영역) */}
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <div
+                    ref={setGanttDateHeaderNode}
+                    className="h-11 flex-shrink-0 overflow-hidden border-b border-slate-850"
+                  >
+                    <div className="h-full flex items-center px-2 text-slate-400 text-xs font-bold" style={{ width: ganttContentWidth }}>
+                      {datesArray.map((dateObj, idx) => (
+                        <div
+                          key={idx}
+                          style={{ width: GANTT_DAY_WIDTH }}
+                          className="flex-shrink-0 flex flex-col items-center text-center border-l border-slate-850/50"
+                        >
+                          <span className="text-[9px] text-slate-500">{dateObj.toLocaleDateString('ko-KR', {month: 'numeric', day: 'numeric'})}</span>
+                          <span className="text-[8px] text-slate-600">
+                            {['일','월','화','수','목','금','토'][dateObj.getDay()]}
+                          </span>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
+                  </div>
+
+                  <div
+                    ref={ganttBodyRef}
+                    onScroll={handleGanttBodyScroll}
+                    className="flex-1 overflow-auto"
+                  >
+                    <div className="divide-y divide-slate-850">
+                      {filteredEpics.map((epic) => {
+                        const hasDates = epic.start_date && epic.due_date;
+                        const barStyle = getGanttBarStyle(epic.start_date, epic.due_date);
+                        const isAiDetected = epic.title.startsWith('[AI-Detected]');
+                        const priorityColor = isAiDetected ? 'from-amber-500 to-amber-600 shadow-amber-500/20' : 'from-blue-500 to-brand-600 shadow-brand-500/20';
+
+                        return (
+                          <div
+                            key={epic.id}
+                            onMouseEnter={() => setHoveredGanttEpicId(epic.id)}
+                            onMouseLeave={() => setHoveredGanttEpicId(null)}
+                            className={`h-[76px] w-fit flex items-center px-2 overflow-hidden transition ${hoveredGanttEpicId === epic.id ? 'bg-[#0f172a]/40' : ''}`}
+                          >
+                            {/* 가로 간트 바 렌더링 (날짜 헤더와 동일한 ganttContentWidth를 사용해 눈금 폭을 정확히 일치시킴) */}
+                            <div className="relative h-6 bg-slate-900/30 rounded-lg flex-shrink-0" style={{ width: ganttContentWidth }}>
+                              {/* 타임라인 격자 배경선 */}
+                              <div className="absolute inset-0 flex pointer-events-none">
+                                {datesArray.map((_, idx) => (
+                                  <div key={idx} style={{ width: GANTT_DAY_WIDTH }} className="h-full border-r border-slate-850/15 flex-shrink-0" />
+                                ))}
+                              </div>
+
+                              {/* 간트 바 본체 */}
+                              {hasDates && (
+                                <div
+                                  style={barStyle}
+                                  onClick={() => { if(currentUser?.role === 'PM') handleOpenEditEpicModal(epic); }}
+                                  className={`absolute h-4 top-1 rounded-full bg-gradient-to-r ${priorityColor} shadow-md flex items-center px-2 text-[9px] text-white font-bold select-none cursor-pointer hover:scale-[1.01] transition transform`}
+                                  title={`${epic.title} - ${getEpicTicketStats(epic.id).text} (${epic.start_date} ~ ${epic.due_date})`}
+                                >
+                                  <span className="truncate">{epic.title} ({getEpicTicketStats(epic.id).percent}%)</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1196,31 +1514,31 @@ export const Dashboard: FC = () => {
 
         {/* ==================== [3. 칸반보드 탭] ==================== */}
         {activeTab === 'kanban' && (
-          <div className="space-y-6">
+          <div className="h-full flex flex-col gap-6">
             {/* 검색바 및 다중 필터링 바 */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#121b2e] border border-slate-800 p-4 rounded-xl">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#121b2e] border border-slate-800 p-3 rounded-xl">
               <div className="flex flex-1 flex-wrap gap-3">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="태스크 제목 검색..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="px-4 py-2 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none text-sm w-full md:max-w-xs"
+                  className="px-4 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none text-sm w-full md:max-w-xs"
                 />
-                <select 
+                <select
                   value={priorityFilter}
                   onChange={(e) => setPriorityFilter(e.target.value)}
-                  className="px-3 py-2 bg-[#1e293b] border border-slate-700 rounded-lg text-white focus:outline-none text-sm cursor-pointer"
+                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white focus:outline-none text-sm cursor-pointer"
                 >
                   <option value="ALL">우선순위 (전체)</option>
                   <option value="P0">P0 (긴급/차단막)</option>
                   <option value="P1">P1 (보통/핵심)</option>
                   <option value="P2">P2 (낮음)</option>
                 </select>
-                <select 
+                <select
                   value={epicFilter}
                   onChange={(e) => setEpicFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                  className="px-3 py-2 bg-[#1e293b] border border-slate-700 rounded-lg text-white focus:outline-none text-sm cursor-pointer"
+                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white focus:outline-none text-sm cursor-pointer"
                 >
                   <option value="ALL">에픽 (전체)</option>
                   {epics.map((epic) => (
@@ -1255,16 +1573,16 @@ export const Dashboard: FC = () => {
             </div>
 
             {/* 4열 칸반보드 렌더링 (동적 티켓 바인딩) */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-1 min-h-0">
               {/* TO_DO */}
-              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 min-h-[40vh]">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800 flex-shrink-0">
                   <span className="font-semibold text-slate-300 text-sm">To Do (대기)</span>
                   <span className="bg-[#1e293b] text-slate-400 text-xs px-2 py-0.5 rounded-full font-bold">
                     {filteredTickets.filter(t => t.status === 'TO_DO').length}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 flex-1 overflow-y-auto">
                   {filteredTickets.filter(t => t.status === 'TO_DO').map(ticket => (
                     <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
@@ -1348,14 +1666,14 @@ export const Dashboard: FC = () => {
               </div>
 
               {/* TO_REVIEW */}
-              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 min-h-[40vh]">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800 flex-shrink-0">
                   <span className="font-semibold text-slate-300 text-sm">To Review (검토 필요)</span>
                   <span className="bg-[#1e293b] text-slate-400 text-xs px-2 py-0.5 rounded-full font-bold">
                     {filteredTickets.filter(t => t.status === 'TO_REVIEW').length}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 flex-1 overflow-y-auto">
                   {filteredTickets.filter(t => t.status === 'TO_REVIEW').map(ticket => {
                     const isAiDetected = ticket.title.startsWith('[AI-Detected]');
                     return (
@@ -1423,14 +1741,14 @@ export const Dashboard: FC = () => {
               </div>
 
               {/* IN_PROGRESS */}
-              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 min-h-[40vh]">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800 flex-shrink-0">
                   <span className="font-semibold text-slate-300 text-sm">In Progress (진행 중)</span>
                   <span className="bg-[#1e293b] text-slate-400 text-xs px-2 py-0.5 rounded-full font-bold">
                     {filteredTickets.filter(t => t.status === 'IN_PROGRESS').length}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 flex-1 overflow-y-auto">
                   {filteredTickets.filter(t => t.status === 'IN_PROGRESS').map(ticket => (
                     <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
@@ -1485,14 +1803,14 @@ export const Dashboard: FC = () => {
               </div>
 
               {/* DONE */}
-              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 min-h-[40vh]">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+              <div className="bg-[#070a13] border border-slate-800 rounded-xl p-4 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800 flex-shrink-0">
                   <span className="font-semibold text-slate-300 text-sm">Done (완료)</span>
                   <span className="bg-[#1e293b] text-slate-400 text-xs px-2 py-0.5 rounded-full font-bold">
                     {filteredTickets.filter(t => t.status === 'DONE').length}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 flex-1 overflow-y-auto">
                   {filteredTickets.filter(t => t.status === 'DONE').map(ticket => (
                     <div key={ticket.id} className="bg-[#1e293b] border border-slate-700 p-4 rounded-lg shadow hover:border-slate-500 transition duration-150 text-left">
                       <div className="flex justify-between items-start mb-2">
@@ -1553,10 +1871,10 @@ export const Dashboard: FC = () => {
 
         {/* ==================== [4. 기능검수명세 탭] ==================== */}
         {activeTab === 'functional_qa' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="h-full flex flex-col gap-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 flex-shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
                   🔍 기능 검수 명세 체크리스트 (Functional QA checklist)
                 </h3>
                 <p className="text-slate-400 text-sm">각 개발 티켓들과 1:N으로 바인딩되어 생성된 세부 기능 명세 검수 요건입니다.</p>
@@ -1565,7 +1883,7 @@ export const Dashboard: FC = () => {
                 <select 
                   value={qaFilter}
                   onChange={(e) => setQaFilter(e.target.value as any)}
-                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
+                  className="px-3 py-1 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
                 >
                   <option value="ALL">검수 상태 (전체)</option>
                   <option value="UNTESTED">검수대기 (UNTESTED)</option>
@@ -1574,9 +1892,9 @@ export const Dashboard: FC = () => {
                 </select>
               </div>
             </div>
-            <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div className="bg-[#070a13] border border-slate-800 rounded-xl shadow-lg flex-1 min-h-0 overflow-y-auto">
               <table className="w-full text-left text-sm">
-                <thead className="bg-[#121b2e] border-b border-slate-800 text-slate-300">
+                <thead className="bg-[#121b2e] border-b border-slate-800 text-slate-300 sticky top-0 z-10">
                   <tr>
                     <th className="px-6 py-3.5 font-semibold">검수 ID</th>
                     <th className="px-6 py-3.5 font-semibold">연계 칸반 티켓</th>
@@ -1648,10 +1966,10 @@ export const Dashboard: FC = () => {
 
         {/* ==================== [5. 품질검수명세 탭] ==================== */}
         {activeTab === 'quality_qa' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="h-full flex flex-col gap-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 flex-shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
                   🛡️ 품질 검수 명세 체크리스트 (Quality QA Checklist)
                 </h3>
                 <p className="text-slate-400 text-sm">성능, 보안 및 코딩 스펙 제약 조건에 대한 품질 검증 가이드 리스트입니다.</p>
@@ -1660,7 +1978,7 @@ export const Dashboard: FC = () => {
                 <select 
                   value={qaFilter}
                   onChange={(e) => setQaFilter(e.target.value as any)}
-                  className="px-3 py-1.5 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
+                  className="px-3 py-1 bg-[#1e293b] border border-slate-700 rounded-lg text-white text-xs font-semibold focus:outline-none focus:border-brand-500 cursor-pointer"
                 >
                   <option value="ALL">검수 상태 (전체)</option>
                   <option value="UNTESTED">검수대기 (UNTESTED)</option>
@@ -1669,9 +1987,9 @@ export const Dashboard: FC = () => {
                 </select>
               </div>
             </div>
-            <div className="bg-[#070a13] border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div className="bg-[#070a13] border border-slate-800 rounded-xl shadow-lg flex-1 min-h-0 overflow-y-auto">
               <table className="w-full text-left text-sm">
-                <thead className="bg-[#121b2e] border-b border-slate-800 text-slate-300">
+                <thead className="bg-[#121b2e] border-b border-slate-800 text-slate-300 sticky top-0 z-10">
                   <tr>
                     <th className="px-6 py-3.5 font-semibold">검수 ID</th>
                     <th className="px-6 py-3.5 font-semibold">연계 칸반 티켓</th>
@@ -1800,6 +2118,148 @@ export const Dashboard: FC = () => {
               >
                 저장
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 제목 옆 "일괄생성" 버튼 레이어 팝업: PRD/Spec/일정(에픽)/칸반(태스크) 4단계 오케스트레이션 */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="bg-[#121b2e] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                ⚡ AI 일괄 생성
+              </h3>
+              <button
+                onClick={handleCloseBulkGenerateModal}
+                disabled={bulkRunning}
+                className="text-slate-400 hover:text-white transition text-lg font-bold disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* 제목 */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">제목 (프로젝트 이름)</label>
+                <input
+                  type="text"
+                  placeholder="예: 반려동물 등록 시스템 개발"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  disabled={bulkRunning}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm font-semibold focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                />
+              </div>
+
+              {bulkModalError && (
+                <div className="bg-red-900/30 border border-red-500/50 text-red-200 text-xs p-3 rounded-lg">
+                  ⚠️ {bulkModalError}
+                </div>
+              )}
+
+              {!bulkRunning ? (
+                <>
+                  {/* 실행 전: 체크박스 목록 */}
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer select-none hover:border-brand-500/60 transition">
+                      <input
+                        type="checkbox"
+                        checked={bulkOptPrd}
+                        onChange={(e) => setBulkOptPrd(e.target.checked)}
+                        className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-sm font-semibold text-white">요구명세서 자동생성</span>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer select-none hover:border-brand-500/60 transition">
+                      <input
+                        type="checkbox"
+                        checked={bulkOptSpec}
+                        onChange={(e) => setBulkOptSpec(e.target.checked)}
+                        className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-sm font-semibold text-white">기능명세서 자동생성</span>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer select-none hover:border-brand-500/60 transition">
+                      <input
+                        type="checkbox"
+                        checked={bulkOptSchedule}
+                        onChange={(e) => setBulkOptSchedule(e.target.checked)}
+                        className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-sm font-semibold text-white">일정(에픽) 자동생성</span>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer select-none hover:border-brand-500/60 transition">
+                      <input
+                        type="checkbox"
+                        checked={bulkOptTask}
+                        onChange={(e) => setBulkOptTask(e.target.checked)}
+                        className="rounded bg-slate-900 border-slate-700 text-brand-500 focus:ring-brand-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-sm font-semibold text-white">칸반보드(태스크) 자동생성</span>
+                    </label>
+                  </div>
+
+                  <Button
+                    onClick={handleRunBulkGenerate}
+                    className="w-full py-2.5 text-sm font-semibold"
+                  >
+                    실행
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {/* 실행 중: 체크박스 대신 단계별 진행 상황 표시 */}
+                  <div className="space-y-2">
+                    {bulkSteps.map((step) => (
+                      <div
+                        key={step.key}
+                        className="flex items-start gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg"
+                      >
+                        <span className="mt-0.5 flex-shrink-0 w-4 h-4 flex items-center justify-center">
+                          {step.status === 'pending' && (
+                            <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+                          )}
+                          {step.status === 'running' && (
+                            <span className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin"></span>
+                          )}
+                          {step.status === 'done' && <span className="text-green-400 text-sm">✓</span>}
+                          {step.status === 'error' && <span className="text-red-400 text-sm">✕</span>}
+                        </span>
+                        <span className="flex-1">
+                          <span
+                            className={`block text-sm font-semibold ${
+                              step.status === 'done'
+                                ? 'text-green-300'
+                                : step.status === 'error'
+                                ? 'text-red-300'
+                                : step.status === 'running'
+                                ? 'text-white'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            {step.label}
+                          </span>
+                          {step.detail && (
+                            <span className="block text-xs text-slate-400 mt-0.5">{step.detail}</span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {bulkSteps.every((s) => s.status === 'done' || s.status === 'error') && (
+                    <button
+                      onClick={handleCloseBulkGenerateModal}
+                      className="w-full py-2.5 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg text-sm font-semibold transition"
+                    >
+                      닫기
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>

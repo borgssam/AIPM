@@ -61,7 +61,7 @@ const AppContent: FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-gray-100 font-sans flex flex-col">
+    <div className="h-screen overflow-hidden bg-[#0b0f19] text-gray-100 font-sans flex flex-col">
       {/* 프리미엄 헤더 바 */}
       <header className="border-b border-slate-800 bg-[#0f172a] px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md">
         <div className="flex items-center gap-2">
@@ -134,7 +134,7 @@ const AppContent: FC = () => {
       </header>
 
       {/* 메인 뷰 컨테이너 */}
-      <main className="flex-1 max-w-7xl w-full mx-auto py-12 px-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto py-6 px-6 flex flex-col overflow-y-auto">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/login" element={<Login />} />
@@ -143,11 +143,6 @@ const AppContent: FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      
-      {/* 하단 푸터 */}
-      <footer className="border-t border-slate-900 bg-[#070a13] py-4 text-center text-xs text-slate-500">
-        &copy; 2026 AI Project Manager. All rights reserved.
-      </footer>
     </div>
   );
 };

@@ -9,6 +9,193 @@ from langchain_core.messages import SystemMessage, HumanMessage
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(dotenv_path)
 
+def generate_prd_draft(project_name: str) -> str:
+    """
+    프로젝트 제목 한 줄만으로 개발팀이 바로 작업에 착수할 수 있는 수준의
+    요구명세서(PRD, Product Requirement Document) 초안을 한국어 마크다운으로 작성합니다.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+
+    if openai_key:
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=openai_key,
+            temperature=0.3
+        )
+    elif gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=gemini_key,
+                temperature=0.3
+            )
+        except ImportError:
+            llm = ChatOpenAI(
+                model="gemini-1.5-flash",
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                temperature=0.3
+            )
+    else:
+        raise ValueError("Neither OPENAI_API_KEY nor GEMINI_API_KEY is configured in the environment.")
+
+    today_str = datetime.today().strftime('%Y-%m-%d')
+
+    system_prompt = f"""
+당신은 전문 AI 프로덕트 매니저(AI PM)입니다. 역할은 프로젝트 제목 한 줄만 주어졌을 때, 개발팀이 실제로 작업에 착수할 수 있는 수준의 상세한 요구명세서(PRD, Product Requirement Document) 초안을 작성하는 것입니다.
+
+오늘 날짜: {today_str}
+
+## 중요 지침:
+1. **언어 제약 조건 (가장 중요 - 절대 규칙)**: 모든 내용은 완전하고 자연스러운 한국어(한글)로 작성해야 합니다. 영어로 응답할 경우 시스템 에러로 간주됩니다.
+2. **문서 구성**: 아래 섹션을 마크다운 형식으로 반드시 포함합니다.
+   - `# {project_name}` (문서 제목)
+   - `## 1. 프로젝트 개요` (배경 및 목적)
+   - `## 2. 핵심 목표` (비즈니스 목표 및 성공 지표)
+   - `## 3. 타겟 사용자`
+   - `## 4. 핵심 기능 요구사항` (기능 단위로 구체적이고 실행 가능하게 나열)
+   - `## 5. 비기능 요구사항` (성능, 보안, 확장성 등)
+   - `## 6. 범위 제외 사항 (Out of Scope)`
+3. **구체성**: 프로젝트 제목에서 유추 가능한 도메인 지식을 활용하여 현실적이고 구체적인 요구사항을 작성하되, 제목이 암시하는 범위를 벗어나지 않도록 합니다.
+4. **출력 형식**: 순수 마크다운 텍스트로만 응답합니다. JSON이나 코드블록(```)으로 감싸지 말고 본문 내용만 바로 출력합니다.
+"""
+
+    human_prompt = f"""
+### 프로젝트 제목:
+{project_name}
+
+위 제목을 바탕으로 요구명세서(PRD) 초안을 작성해 주세요.
+"""
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt)
+    ]
+
+    print("\n" + "=" * 50 + " [LLM PRD DRAFT REQUEST PROMPT] " + "=" * 50)
+    print(f"[SYSTEM PROMPT]\n{system_prompt}")
+    print(f"[HUMAN PROMPT]\n{human_prompt}")
+    print("=" * 130 + "\n")
+
+    response = llm.invoke(messages)
+
+    print("\n" + "=" * 50 + " [LLM PRD DRAFT RESPONSE RAW CONTENT] " + "=" * 50)
+    print(response.content)
+    print("=" * 136 + "\n")
+
+    content = response.content.strip()
+
+    # 응답이 코드블록(```)으로 감싸져 나온 경우를 대비한 방어 코드
+    if content.startswith("```"):
+        lines = content.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
+
+    return content
+
+
+def generate_spec_draft(project_name: str, prd_content: str) -> str:
+    """
+    프로젝트 제목과 요구명세서(PRD)를 바탕으로, 개발팀이 바로 구현에 착수할 수 있는 수준의
+    기능명세서(Functional Specification) 초안을 한국어 마크다운으로 작성합니다.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+
+    if openai_key:
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=openai_key,
+            temperature=0.3
+        )
+    elif gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=gemini_key,
+                temperature=0.3
+            )
+        except ImportError:
+            llm = ChatOpenAI(
+                model="gemini-1.5-flash",
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                temperature=0.3
+            )
+    else:
+        raise ValueError("Neither OPENAI_API_KEY nor GEMINI_API_KEY is configured in the environment.")
+
+    today_str = datetime.today().strftime('%Y-%m-%d')
+
+    system_prompt = f"""
+당신은 전문 AI 프로덕트 매니저(AI PM)입니다. 역할은 프로젝트 제목과 요구명세서(PRD)를 바탕으로, 개발팀이 실제로 구현에 착수할 수 있는 수준의 상세한 기능명세서(Functional Specification) 초안을 작성하는 것입니다.
+
+오늘 날짜: {today_str}
+
+## 중요 지침:
+1. **언어 제약 조건 (가장 중요 - 절대 규칙)**: 입력된 PRD가 영어로 작성되어 있더라도, 출력하는 기능명세서는 완전하고 자연스러운 한국어(한글)로 작성해야 합니다. 영어로 응답할 경우 시스템 에러로 간주됩니다.
+2. **PRD와의 일관성**: 반드시 제공된 PRD의 핵심 기능 요구사항 범위 내에서 기능을 구체화해야 하며, PRD에 없는 임의의 기능을 새로 만들어내지 않습니다. PRD의 각 기능 요구사항이 최소 하나 이상의 기능 명세 항목으로 대응되어야 합니다.
+3. **문서 구성**: 아래 섹션을 마크다운 형식으로 반드시 포함합니다.
+   - `# {project_name} 기능명세서` (문서 제목)
+   - `## 1. 문서 개요` (PRD와의 연계 설명)
+   - `## 2. 기능 목록` (기능 ID, 기능명, 개요를 표 형태로 정리)
+   - `## 3. 기능별 상세 명세` (기능 단위로 아래 항목을 포함)
+     - 기능 설명 및 사용자 시나리오
+     - 입력/출력 및 처리 로직
+     - 예외 처리 및 에러 케이스
+     - 관련 화면(UI) 및 API 연동 개요
+   - `## 4. 데이터 및 화면 흐름` (핵심 화면 전환 및 데이터 흐름 개요)
+   - `## 5. 검증 및 QA 포인트` (기능별로 반드시 확인해야 할 검증 기준)
+4. **구체성**: 실제 구현이 가능하도록 각 기능의 동작 조건, 예외 상황, 데이터 처리 규칙을 구체적으로 서술합니다.
+5. **출력 형식**: 순수 마크다운 텍스트로만 응답합니다. JSON이나 코드블록(```)으로 감싸지 말고 본문 내용만 바로 출력합니다.
+"""
+
+    human_prompt = f"""
+### 프로젝트 제목:
+{project_name}
+
+### 입력 요구명세서 (PRD):
+{prd_content}
+
+위 프로젝트 제목과 요구명세서(PRD)를 바탕으로 기능명세서(Functional Specification) 초안을 작성해 주세요.
+"""
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt)
+    ]
+
+    print("\n" + "=" * 50 + " [LLM SPEC DRAFT REQUEST PROMPT] " + "=" * 50)
+    print(f"[SYSTEM PROMPT]\n{system_prompt}")
+    print(f"[HUMAN PROMPT]\n{human_prompt}")
+    print("=" * 130 + "\n")
+
+    response = llm.invoke(messages)
+
+    print("\n" + "=" * 50 + " [LLM SPEC DRAFT RESPONSE RAW CONTENT] " + "=" * 50)
+    print(response.content)
+    print("=" * 136 + "\n")
+
+    content = response.content.strip()
+
+    # 응답이 코드블록(```)으로 감싸져 나온 경우를 대비한 방어 코드
+    if content.startswith("```"):
+        lines = content.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
+
+    return content
+
+
 def analyze_specifications(
     prd_content: str, 
     spec_content: str, 
